@@ -552,6 +552,18 @@ cd .claude/skills/excalidraw-diagram/references && uv run python render_excalidr
 
 This outputs a PNG next to the `.excalidraw` file. Then use the **Read tool** on the PNG to actually view it.
 
+**Transparent background (only when asked):** if the user wants an image that works on both light and dark pages (README, docs site with a theme toggle), export with `--transparent`:
+
+```bash
+node scripts/export_image.mjs --transparent <file.excalidraw> <file.png>
+```
+
+A transparent export has no canvas, so the diagram itself must work on either background:
+- No pure-black or pure-white fills. Replace a `#1e1e1e` band with a mid-tone from the palette (for example green `#d3f9d8` / `#2f9e44`) and put dark text on it.
+- Free-floating text that sits directly on the page (axis labels, legend labels, annotations) uses mid-grey `#868e96`, which stays legible on both `#ffffff` and `#121212`.
+- Text inside a filled shape keeps its normal colour; the fill carries the contrast.
+- Render twice to check: once with `--transparent` and once with `--transparent --dark`, and view both PNGs.
+
 ### The Loop
 
 After generating the initial JSON, run this cycle:

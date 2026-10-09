@@ -40,9 +40,14 @@ const execFileAsync = promisify(execFile);
 
 const args = process.argv.slice(2);
 const dark = args.includes("--dark");
+// --transparent: no canvas rect, so the PNG/SVG has an alpha background and
+// can sit on a light or dark page. Pair it with colours that work on both
+// (no pure black/white fills, mid-grey #868e96 for free text such as axes
+// and legends).
+const transparent = args.includes("--transparent");
 const [inputPath, outputPath] = args.filter((a) => !a.startsWith("--"));
 if (!inputPath || !outputPath) {
-  console.error("Usage: export_image.mjs [--dark] <input.excalidraw> <output.svg|output.png>");
+  console.error("Usage: export_image.mjs [--dark] [--transparent] <input.excalidraw> <output.svg|output.png>");
   process.exit(1);
 }
 
@@ -113,7 +118,7 @@ const svg = await exportToSvg({
   appState: {
     ...(data.appState ?? {}),
     exportWithDarkMode: false,
-    exportBackground: true,
+    exportBackground: !transparent,
     ...(dark ? { viewBackgroundColor: DARK_BG } : {}),
   },
   files: data.files || null,
