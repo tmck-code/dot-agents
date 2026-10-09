@@ -25,7 +25,7 @@ All elements share these:
 | `strokeColor` | string | Border color (hex) |
 | `backgroundColor` | string | Fill color (hex or "transparent") |
 | `fillStyle` | string | "solid", "hachure", "cross-hatch" |
-| `strokeWidth` | number | 1, 2, or 4 |
+| `strokeWidth` | number | 1 (shadows), 2 (default: shapes and arrows), 3 (emphasis) |
 | `strokeStyle` | string | "solid", "dashed", "dotted" |
 | `roughness` | number | 0 (smooth), 1 (default), 2 (rough) |
 | `opacity` | number | 0-100 |
@@ -38,7 +38,7 @@ All elements share these:
 | `text` | The display text |
 | `originalText` | Same as text |
 | `fontSize` | Size in pixels (16-20 recommended) |
-| `fontFamily` | 3 for monospace (use this) |
+| `fontFamily` | 8 (Comic Shanns) for body text. 5 (Excalifont) for chart, row and section titles. |
 | `textAlign` | "left", "center", "right" |
 | `verticalAlign` | "top", "middle", "bottom" |
 | `containerId` | ID of parent shape |
@@ -47,21 +47,31 @@ All elements share these:
 
 | Property | Description |
 |----------|-------------|
-| `points` | Array of [x, y] coordinates |
+| `elbowed` | `true` for elbow arrows (the default style). Set `roundness` to null. |
+| `points` | Array of [x, y] coordinates. Elbow arrows use right-angle segments. |
 | `startBinding` | Connection to start shape |
 | `endBinding` | Connection to end shape |
-| `startArrowhead` | null, "arrow", "bar", "dot", "triangle" |
-| `endArrowhead` | null, "arrow", "bar", "dot", "triangle" |
+| `startArrowhead` | null (default), "arrow", "bar", "dot", "triangle" |
+| `endArrowhead` | "triangle" (default), or null, "arrow", "bar", "dot" |
+| `strokeStyle` | "solid", or "dashed" for return, loop-back, optional and async flows |
+| `boundElements` | Lists the arrow's bound label: `{"id": "<label id>", "type": "text"}` |
+
+An arrow label is a text element whose `containerId` is the arrow id.
 
 ## Binding Format
 
 ```json
 {
   "elementId": "shapeId",
-  "focus": 0,
-  "gap": 2
+  "fixedPoint": [1, 0.5],
+  "mode": "orbit"
 }
 ```
+
+- `fixedPoint`: where the arrow meets the shape, as fractions of its width and height. `[1, 0.5]` is the middle of the right edge.
+- `mode`: "orbit" keeps the arrow outside the shape. "inside" lets it end within the shape.
+- Leave a 6 px gap between each arrow end and its shape.
+- Add the arrow to `boundElements` of each bound shape: `{"id": "<arrow id>", "type": "arrow"}`.
 
 ## Rectangle Roundness
 
@@ -69,3 +79,7 @@ Add for rounded corners:
 ```json
 "roundness": { "type": 3 }
 ```
+
+## Shadow and Opacity
+
+Shadows are plain rectangles with `opacity` 80 and `strokeWidth` 1. See `element-templates.md`. All other elements use `opacity` 100.

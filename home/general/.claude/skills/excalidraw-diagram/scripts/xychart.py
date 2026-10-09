@@ -20,7 +20,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from convert import _base, document, new_id  # noqa: E402  (sibling module)
 
-FONT_FAMILY = 3            # monospace, as in the skill's modern style
+FONT_FAMILY = 8            # body text
+TITLE_FONT_FAMILY = 5      # chart title
 CHAR_W = 0.6               # * font size, Excalidraw's mono face
 TITLE_FONT = 20.0
 TITLE_COLOR = '#1e40af'
@@ -203,12 +204,13 @@ def _wrap(label, max_chars):
     return lines
 
 
-def _text(text, x, y, width, font, align, color=TEXT_COLOR, angle=0.0):
+def _text(text, x, y, width, font, align, color=TEXT_COLOR, angle=0.0,
+          family=FONT_FAMILY):
     lines = text.count('\n') + 1
     return _base(
         new_id(), 'text', x, y, width, font * LINE_H * lines, [],
         strokeColor=color, backgroundColor='transparent', angle=angle,
-        text=text, originalText=text, fontSize=font, fontFamily=FONT_FAMILY,
+        text=text, originalText=text, fontSize=font, fontFamily=family,
         textAlign=align, verticalAlign='top', containerId=None,
         autoResize=False, lineHeight=LINE_H,
     )
@@ -447,7 +449,8 @@ def convert_xychart(mermaid_text, legend_names=None):
         left = -left_extent
         els.append(_text(chart.title, (left + right_edge) / 2 - w / 2,
                          -TITLE_GAP - TITLE_FONT * LINE_H - VALUE_FONT * LINE_H, w,
-                         TITLE_FONT, 'center', color=TITLE_COLOR))
+                         TITLE_FONT, 'center', color=TITLE_COLOR,
+                         family=TITLE_FONT_FAMILY))
     return els
 
 

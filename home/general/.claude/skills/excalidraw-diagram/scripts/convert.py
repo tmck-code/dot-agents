@@ -62,7 +62,8 @@ PALETTE = [
 # every ratio below is that file's geometry divided through by its row
 # font size, then re-multiplied by ERD_ROW_FONT.
 ERD_ROW_FONT = 20.0
-ERD_FONT_FAMILY = 3  # code / monospace
+ERD_FONT_FAMILY = 8  # body text
+ERD_TITLE_FONT_FAMILY = 5  # entity titles
 ERD_TITLE_FONT = ERD_ROW_FONT * 1.385
 ERD_ROW_H = ERD_ROW_FONT * 2.307
 ERD_HEADER_H = ERD_ROW_FONT * 3.075
@@ -488,11 +489,12 @@ def _base(el_id, el_type, x, y, width, height, group_ids, **extra):
     return el
 
 
-def _erd_text(text, x, y, width, color, font_size, align, group_ids):
+def _erd_text(text, x, y, width, color, font_size, align, group_ids,
+              family=ERD_FONT_FAMILY):
     return _base(
         new_id(), "text", x, y, width, font_size * 1.25, group_ids,
         strokeColor=color, text=text, originalText=text,
-        fontSize=font_size, fontFamily=ERD_FONT_FAMILY,
+        fontSize=font_size, fontFamily=family,
         textAlign=align, verticalAlign="top", containerId=None,
         autoResize=False, lineHeight=1.25,
     )
@@ -518,7 +520,8 @@ def make_erd_table(entity, accent, tint):
 
     els.append(_erd_text(entity.label, entity.x,
                          entity.y + ERD_TITLE_OFFSET_Y, entity.width,
-                         ERD_TITLE_COLOR, ERD_TITLE_FONT, "center", group_ids))
+                         ERD_TITLE_COLOR, ERD_TITLE_FONT, "center", group_ids,
+                         family=ERD_TITLE_FONT_FAMILY))
 
     text_w = entity.width - 2 * ERD_PAD_X
     row_text_dy = (ERD_ROW_H - ERD_ROW_FONT * 1.25) / 2.0
