@@ -546,23 +546,35 @@ You cannot judge a diagram from JSON alone. After generating or editing the Exca
 
 ### How to Render
 
-```bash
-cd .claude/skills/excalidraw-diagram/references && uv run python render_excalidraw.py <path-to-file.excalidraw>
-```
-
-This outputs a PNG next to the `.excalidraw` file. Then use the **Read tool** on the PNG to actually view it.
-
-**Transparent background (only when asked):** if the user wants an image that works on both light and dark pages (README, docs site with a theme toggle), export with `--transparent`:
+Build the image once, from the skill directory:
 
 ```bash
-node scripts/export_image.mjs --transparent <file.excalidraw> <file.png>
+docker build -t excalidraw-render .
 ```
+
+Render from the directory that holds the diagram:
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/data" excalidraw-render in.excalidraw --output out.png [--scale 1] [--width N] [--transparent] [--dark] [--svg out.svg]
+```
+
+- `--scale` defaults to 1. Use 2 for higher resolution.
+- An SVG is written beside the PNG with the same stem. `--svg` sets another path.
+- `--transparent` removes the background and keeps alpha.
+- `--dark` is a true dark render (Excalidraw `exportWithDarkMode`).
+- Rendering fetches Excalidraw and fonts from esm.sh, so it needs network access.
+- Without Docker: run `uv run render_excalidraw.py ...` inside `references/`.
+
+Then use the **Read tool** on the PNG to view it.
+
+**Transparent background (only when asked):** if the user wants an image that works on both light and dark pages (README, docs site with a theme toggle), export with `--transparent`.
 
 A transparent export has no canvas, so the diagram itself must work on either background:
-- No pure-black or pure-white fills. Replace a `#1e1e1e` band with a mid-tone from the palette (for example green `#d3f9d8` / `#2f9e44`) and put dark text on it.
-- Free-floating text that sits directly on the page (axis labels, legend labels, annotations) uses mid-grey `#868e96`, which stays legible on both `#ffffff` and `#121212`.
-- Text inside a filled shape keeps its normal colour; the fill carries the contrast.
-- Render twice to check: once with `--transparent` and once with `--transparent --dark`, and view both PNGs.
+- Use grey `#868e96` for everything drawn with no fill behind it: free text, arrow and line strokes, arrow labels, frame outlines, unfilled containers and their text.
+- Text inside a filled shape stays near-black.
+- No pure-black or pure-white fills. Replace a `#1e1e1e` band with a mid-tone from the palette (for example green `#d3f9d8` / `#2f9e44`).
+- Legibility check for `--transparent`: run `magick out.png -background '#121212' -flatten check.png` and view `check.png`.
+- `--dark` is a true dark render, so the diagram can also be checked by rendering with `--dark` and viewing it.
 
 ### The Loop
 
@@ -609,11 +621,9 @@ The loop is done when:
 - You'd be comfortable showing it to someone without caveats
 
 ### First-Time Setup
-If the render script hasn't been set up yet:
+If the render image has not been built yet, run this from the skill directory:
 ```bash
-cd .claude/skills/excalidraw-diagram/references
-uv sync
-uv run playwright install chromium
+docker build -t excalidraw-render .
 ```
 
 ---

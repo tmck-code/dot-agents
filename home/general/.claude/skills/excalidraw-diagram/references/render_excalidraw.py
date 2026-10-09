@@ -2,7 +2,10 @@
 
 Usage:
     cd .claude/skills/excalidraw-diagram/references
-    uv run python render_excalidraw.py <path-to-file.excalidraw> [--output path.png] [--scale 2] [--width 1920]
+    uv run python render_excalidraw.py <path-to-file.excalidraw> [--output path.png]
+        [--svg path.svg] [--scale 1] [--width 1920] [--transparent] [--dark]
+
+An SVG is always written beside the PNG (same stem) unless --svg is given.
 
 First-time setup:
     cd .claude/skills/excalidraw-diagram/references
@@ -72,8 +75,11 @@ def compute_bounding_box(elements: list[dict]) -> tuple[float, float, float, flo
 def render(
     excalidraw_path: Path,
     output_path: Path | None = None,
-    scale: int = 2,
+    scale: int = 1,
     max_width: int = 1920,
+    transparent: bool = False,
+    dark: bool = False,
+    svg_path: Path | None = None,
 ) -> Path:
     """Render an .excalidraw file to PNG. Returns the output PNG path."""
     # Import playwright here so validation errors show before import errors
@@ -120,6 +126,9 @@ def render(
         print(f"ERROR: Template not found at {template_path}", file=sys.stderr)
         sys.exit(1)
 
+    if svg_path is None:
+        svg_path = output_path.with_suffix('.svg')
+
     template_url = template_path.as_uri()
 
     with sync_playwright() as p:
@@ -145,7 +154,8 @@ def render(
 
         # Inject the diagram data and render
         json_str = json.dumps(data)
-        result = page.evaluate(f"window.renderDiagram({json_str})")
+        options = json.dumps({'transparent': transparent, 'dark': dark})
+        result = page.evaluate(f'window.renderDiagram({json_str}, {options})')
 
         if not result or not result.get("success"):
             error_msg = result.get("error", "Unknown render error") if result else "renderDiagram returned null"
@@ -163,7 +173,8 @@ def render(
             browser.close()
             sys.exit(1)
 
-        svg_el.screenshot(path=str(output_path))
+        svg_path.write_text(page.evaluate('document.querySelector("#root svg").outerHTML'), encoding='utf-8')
+        svg_el.screenshot(path=str(output_path), omit_background=transparent)
         browser.close()
 
     return output_path
@@ -173,7 +184,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Render Excalidraw JSON to PNG")
     parser.add_argument("input", type=Path, help="Path to .excalidraw JSON file")
     parser.add_argument("--output", "-o", type=Path, default=None, help="Output PNG path (default: same name with .png)")
-    parser.add_argument("--scale", "-s", type=int, default=2, help="Device scale factor (default: 2)")
+    parser.add_argument("--svg", type=Path, default=None, help="Output SVG path (default: beside the PNG, same stem)")
+    parser.add_argument("--scale", "-s", type=int, default=1, help="Device scale factor (default: 1)")
+    parser.add_argument("--transparent", action="store_true", help="Transparent background (alpha kept in PNG)")
+    parser.add_argument("--dark", action="store_true", help="Export with dark mode")
     parser.add_argument("--width", "-w", type=int, default=1920, help="Max viewport width (default: 1920)")
     args = parser.parse_args()
 
@@ -181,7 +195,7 @@ def main() -> None:
         print(f"ERROR: File not found: {args.input}", file=sys.stderr)
         sys.exit(1)
 
-    png_path = render(args.input, args.output, args.scale, args.width)
+    png_path = render(args.input, args.output, args.scale, args.width, args.transparent, args.dark, args.svg)
     print(str(png_path))
 
 

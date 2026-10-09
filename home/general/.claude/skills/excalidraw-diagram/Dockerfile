@@ -1,16 +1,9 @@
-FROM node:22-slim
-
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends librsvg2-bin fontconfig \
-    && rm -rf /var/lib/apt/lists/*
-
+# Rendering needs network access (esm.sh bundle and fonts are fetched at render time).
+# Build: docker build -t excalidraw-render .   (from this directory; context = skill dir)
+# Run:   docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/data" excalidraw-render in.excalidraw --output out.png
+FROM mcr.microsoft.com/playwright/python:v1.61.0-noble
+RUN pip install --no-cache-dir --break-system-packages playwright==1.61.0
 WORKDIR /work
-
-COPY scripts/package.json scripts/package-lock.json ./
-RUN npm ci --omit=dev
-
-COPY scripts/export_image.mjs ./
-COPY fonts/*.ttf /work/fonts/
-
+COPY references/render_excalidraw.py references/render_template.html ./
 WORKDIR /data
-ENTRYPOINT ["node", "/work/export_image.mjs"]
+ENTRYPOINT ["python3", "/work/render_excalidraw.py"]
