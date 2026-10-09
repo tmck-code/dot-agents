@@ -116,6 +116,8 @@ Copy-paste JSON templates for each Excalidraw element type. Placeholder colors i
 ```
 
 ## Text (centered in shape)
+For text bound in a shape, `height` must equal `ceil(fontSize * lineHeight * lines)`. Otherwise it renders at the top of the shape. (16 px, lineHeight 1.25, one line: 20.)
+
 ```json
 {
   "type": "text",
@@ -240,7 +242,7 @@ Elbow arrow. The default for all connections. Rules:
   "versionNonce": 44444,
   "isDeleted": false,
   "groupIds": [],
-  "boundElements": [{"id": "arrow1-label", "type": "text"}],
+  "boundElements": null,
   "link": null,
   "locked": false,
   "elbowed": true,
@@ -259,13 +261,20 @@ Dashed variant: set `"strokeStyle": "dashed"`. Use it for return, loop-back, opt
 For a bend, add corner points to `points`, for example `[[0, 0], [59, 0], [59, 80], [118, 80]]`, and set `height` to 80.
 
 ## Arrow Label
-Put a qualifier on the arrow, not in the box. The label is a text element bound to the arrow: `containerId` is the arrow id, and the arrow lists the label in its `boundElements`.
+Put a qualifier on the arrow, not in the box. Bind the label: set the text's `containerId` to the arrow id, and list the text in the arrow's `boundElements` as `{"id": "arrow1-label", "type": "text"}`.
+
+The renderer hides the arrow line only inside the label's declared box. If the box is smaller than the rendered text, the line shows through the text. So size the box to the text:
+
+- `width` = `ceil(chars * fontSize * 0.6) + 6` (verified for fontFamily 8; for fontSize 12 this is `ceil(chars * 7.2) + 6`).
+- A labelled segment must be at least label width + 40 px long. For elbow arrows the renderer puts the label at the middle vertex of `points` and re-routes from `fixedPoint`, so `points` are a hint. Fan-out arrows from one box need distinct segment positions. Self-loops use an unbound label beside the loop.
+- `height` = `ceil(fontSize * lineHeight)` (15 for fontSize 12, lineHeight 1.25).
+- Centre the box on the midpoint of the arrow's middle segment: `x` = midpoint x minus width / 2, `y` = midpoint y minus height / 2. For a straight arrow the midpoint is `(arrow.x + width / 2, arrow.y + height / 2)`.
 ```json
 {
   "type": "text",
   "id": "arrow1-label",
-  "x": 320, "y": 133,
-  "width": 50, "height": 15,
+  "x": 305, "y": 137.5,
+  "width": 61, "height": 15,
   "text": "on error",
   "originalText": "on error",
   "fontSize": 12,

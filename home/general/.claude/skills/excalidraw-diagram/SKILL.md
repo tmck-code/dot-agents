@@ -381,7 +381,10 @@ apply to pure charts (pie, xychart-beta) or mindmaps.
   return paths, loop-backs and optional or async flows. Keep solid for the
   main path.
 - **Arrow labels**: bind the label to its arrow. Set the text's `containerId`
-  to the arrow id and list the text in the arrow's `boundElements`. Label
+  to the arrow id and list the text in the arrow's `boundElements`. Size the
+  label box to the text (`width = ceil(chars * fontSize * 0.6) + 6`,
+  `height = ceil(fontSize * 1.25)`) and centre it on the arrow midpoint, or the
+  line shows through the text. Label
   color is `#868e96`. Put qualifiers (conditions, rule names) here, not in
   the target box.
 - **Rounded corners**: every rectangle has `roundness: {"type": 3}`.
@@ -404,16 +407,23 @@ apply to pure charts (pie, xychart-beta) or mindmaps.
   and no bindings. It shares the shape's `groupIds`. Place it immediately
   before its shape in `elements`, with an `index` that sorts just before the
   shape's. Skip legend swatches, full-width bands, the bottom summary box, and
-  dashed or unfilled shapes.
-- **Legend**: every diagram has one, top-right. One 26x20 swatch per concept,
+  dashed or unfilled shapes. Any filled shape type that holds text gets a
+  shadow (not only rectangles). To add shadows in bulk:
+  `python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]`.
+  The script skips legend swatches (size 26x20).
+- **Legend**: every diagram has one, top-right by default. If that area holds a
+  node, arrow or header, use the nearest free corner. One 26x20 swatch per concept,
   with its label in `#868e96`. Swatches have no shadow.
 - **Node layout**: rule boxes hold only a title and a one-line summary. Top-align
-  boxes on a row with 20 px gaps. Node widths are about 0.85 of the Layout
-  Principles sizes.
+  boxes on a row. Gaps: 20 px between boxes on one row with no arrow between
+  them. Where an arrow runs between shapes, the gap fits 6 px + arrow + 6 px.
+  For a labelled arrow, the gap is label width + about 40 px. Minimum 60 px
+  for an unlabelled arrow. Size boxes to text plus padding (see Layout
+  Principles); do not stretch them.
 - **Well-known systems get their real symbol, not a text label.** E.g.
   Elasticsearch/OpenSearch nodes are drawn as the actual multi-color Elastic
-  logo (bent-line shape in the brand palette: `#f4bd19`, `#3cbeb1`,
-  `#e9478c`, `#2c458f`, `#95c63d`, `#176655`) rather than a box labeled "ES".
+  logo (bent-line shape in the palette colours from `color-palette.md`)
+  rather than a box labeled "ES".
   Reuse this pattern for other recognizable third-party systems where a
   simple brand mark exists.
 - After hand-edits land in the live collection, re-fetch via `GET
@@ -457,7 +467,7 @@ Instead of full shapes, use small dots (10-20px ellipses) as:
 - **Secondary**: 120×60
 - **Small**: 60×40
 
-Rendered node widths are about 0.85 of these sizes. Heights stay as listed.
+These are reference sizes. Size each box to its text plus padding: 20 px each side horizontally, 12 px vertically. Do not stretch boxes to a size.
 
 ### Whitespace = Importance
 The most important element has the most empty space around it (200px+).
@@ -467,7 +477,7 @@ Guide the eye: typically left→right or top→bottom for sequences, radial for 
 
 ### Spacing Minimums
 - Gap between nodes: at least one node height (one node width for horizontal flow). Exception: boxes in one top-aligned row use 20 px gaps.
-- Padding between text and shape edge: at least 16px horizontal, 12px vertical.
+- Padding between text and shape edge: at least 20 px horizontal, 12 px vertical.
 - Aim for about 10 nodes per diagram. Beyond that, split into sections or frames.
 
 ### Connections Required
@@ -514,6 +524,23 @@ Use `fontFamily: 8` (Comic Shanns) for all other text. Never use `fontFamily: 3`
   "files": {}
 }
 ```
+
+Editable files use `#ffffff` as `viewBackgroundColor`. A cream scene background set by the user in Excalidraw+ is kept on re-upload.
+
+## Arrow Labels and Elbow Arrows
+
+- A labelled arrow segment must be at least label width + 40 px long.
+- For elbow arrows, the renderer places the bound label at the middle vertex (middle segment) of `points`. It re-routes elbow arrows from `fixedPoint`, so `points` are only a hint.
+- Fan-out arrows from one box need distinct segment positions, so their bends and labels do not overlap.
+- Self-loops: use an unbound label beside the loop. This is the exception to the bound-label rule.
+
+## Sequence Diagrams
+
+- Draw lifelines as narrow rectangles so arrows can bind to them. Or use lines split around labels.
+- Put notes above the lifelines.
+- Loop and par frames are dashed `#868e96` rectangles with a tab label.
+- Actor boxes appear only at the top.
+- Return arrows are dashed, not dotted.
 
 ## Element Templates
 
@@ -606,7 +633,7 @@ docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/data" excalidraw-r
 ```
 
 - `--scale` defaults to 1. Use 2 for higher resolution.
-- An SVG is written beside the PNG with the same stem. `--svg` sets another path.
+- An SVG is written beside the PNG with the same stem. `--svg path` sets another path. `--output` is for the PNG only; `--output x.svg` fails with "Unsupported screenshot mime type".
 - `--transparent` removes the background and keeps alpha.
 - `--dark` is a true dark render (Excalidraw `exportWithDarkMode`).
 - Rendering fetches Excalidraw and fonts from esm.sh, so it needs network access.
@@ -716,4 +743,4 @@ docker build -t excalidraw-render .
 25. **Arrows land correctly**: Arrows connect to intended elements without crossing others
 26. **Readable at export size**: Text is legible in the rendered PNG
 27. **Balanced composition**: No large empty voids or overcrowded regions
-28. **Spacing minimums**: Node gaps at least one node height (20 px between boxes in one top-aligned row); text padding at least 16px by 12px; about 10 nodes or fewer per diagram
+28. **Spacing minimums**: Node gaps at least one node height (20 px between boxes in one top-aligned row); text padding at least 20 px horizontal by 12 px vertical; about 10 nodes or fewer per diagram

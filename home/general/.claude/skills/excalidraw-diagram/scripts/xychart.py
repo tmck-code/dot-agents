@@ -24,13 +24,13 @@ FONT_FAMILY = 8            # body text
 TITLE_FONT_FAMILY = 5      # chart title
 CHAR_W = 0.6               # * font size, Excalidraw's mono face
 TITLE_FONT = 20.0
-TITLE_COLOR = '#1e40af'
+TITLE_COLOR = '#868e96'
 AXIS_FONT = 16.0
 VALUE_FONT = 14.0
 LEGEND_FONT = 16.0
-TEXT_COLOR = '#374151'
-AXIS_COLOR = '#1e3a5f'
-GRID_COLOR = '#e2e8f0'
+TEXT_COLOR = '#868e96'
+AXIS_COLOR = '#868e96'
+GRID_COLOR = '#868e96'
 LINE_H = 1.25
 
 PLOT_H = 320.0             # value-axis length
@@ -52,12 +52,12 @@ MAX_VALUE_LABEL_CATS = 12
 
 # (fill, stroke) pairs from references/color-palette.md
 PALETTE = [
-    ('#3b82f6', '#1e3a5f'),   # primary blue
-    ('#fed7aa', '#c2410c'),   # start/trigger orange
-    ('#a7f3d0', '#047857'),   # end/success green
-    ('#ddd6fe', '#6d28d9'),   # AI purple
-    ('#fef3c7', '#b45309'),   # decision yellow
-    ('#fecaca', '#b91c1c'),   # error red
+    ('#d0ebff', '#1971c2'),   # blue (agents)
+    ('#d3f9d8', '#2f9e44'),   # green (skills)
+    ('#ffec99', '#f08c00'),   # orange (hooks)
+    ('#ffe3e3', '#e03131'),   # red (user)
+    ('#eebefa', '#9c36b5'),   # purple (files)
+    ('#f1f3f5', '#868e96'),   # grey (inactive)
 ]
 
 RANGE_RE = re.compile(r'^(?:"([^"]*)"\s*)?(-?\d+(?:\.\d+)?)\s*-->\s*(-?\d+(?:\.\d+)?)$')
@@ -408,7 +408,7 @@ def convert_xychart(mermaid_text, legend_names=None):
         w = len(bottom_title) * AXIS_FONT * CHAR_W
         els.append(_text(bottom_title, axis_w / 2 - w / 2,
                          axis_h + bottom_extent + AXIS_LABEL_GAP, w, AXIS_FONT,
-                         'center', color='#64748b'))
+                         'center', color='#868e96'))
         bottom_extent += AXIS_LABEL_GAP + AXIS_FONT * LINE_H
     if left_title:
         w = len(left_title) * AXIS_FONT * CHAR_W
@@ -416,7 +416,7 @@ def convert_xychart(mermaid_text, legend_names=None):
         cx = -left_extent - AXIS_LABEL_GAP - h / 2
         cy = axis_h / 2
         els.append(_text(left_title, cx - w / 2, cy - h / 2, w, AXIS_FONT,
-                         'center', color='#64748b', angle=-math.pi / 2))
+                         'center', color='#868e96', angle=-math.pi / 2))
         left_extent += AXIS_LABEL_GAP + h
 
     # --- legend ------------------------------------------------------------

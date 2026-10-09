@@ -35,7 +35,7 @@ cd .claude/skills/excalidraw-diagram
 docker build -t excalidraw-render .
 ```
 
-Rendering fetches Excalidraw and fonts from esm.sh, so it needs network access. Without Docker, run `uv run render_excalidraw.py ...` inside `references/`.
+Rendering fetches Excalidraw and fonts from esm.sh, so it needs network access. SVG is written with `--svg path`; `--output` is for the PNG (`--output x.svg` fails with "Unsupported screenshot mime type"). Without Docker, run `uv run render_excalidraw.py ...` inside `references/`.
 
 ## Usage
 
@@ -44,6 +44,13 @@ Ask your coding agent to create a diagram:
 > "Create an Excalidraw diagram showing how the AG-UI protocol streams events from an AI agent to a frontend UI"
 
 The skill handles the rest — concept mapping, layout, JSON generation, rendering, and visual validation.
+
+The generator scripts can also be run directly:
+
+```bash
+python3 scripts/convert.py diagram.mmd diagram.excalidraw        # Mermaid to Excalidraw
+python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]
+```
 
 ## Customize Colors
 

@@ -17,7 +17,10 @@ Colors encode meaning, not decoration. Each concept has a fill/stroke pair.
 | Agents | `#d0ebff` | `#1971c2` | `#e7f5ff` |
 | Skills, CLI, gates | `#d3f9d8` | `#2f9e44` | `#ebfbee` |
 | Files on disk | `#eebefa` | `#9c36b5` | `#f8f0fc` |
+| Extra category (when more than five are needed) | `#dbe4ff` | `#4263eb` | `#edf2ff` |
 | Unknown, inactive | `#f1f3f5` | `#868e96` (dashed stroke) | `#f8f9fa` |
+
+**Tints**: generators may use other Open Color steps (for example 1 to 2 for fills, 7 to 9 for strokes) for tints, so long as every value is an Open Color hex.
 
 **Rule**: Always pair a darker stroke with a lighter fill.
 
@@ -31,7 +34,7 @@ Colors encode meaning, not decoration. Each concept has a fill/stroke pair.
 
 Every diagram is exported for light and dark backgrounds. These rules keep it readable on both.
 
-- No pure black (`#000000`) or pure white (`#ffffff`) fills.
+- No pure black (`#000000`) or pure white (`#ffffff`) fills. White (`#ffffff`) text on a saturated header fill is allowed.
 - Free text, arrow strokes, arrow labels, frame outlines and unfilled containers: `#868e96`.
 - Text inside filled shapes: `#1e1e1e`.
 - Shadows use the shape's stroke color (see `element-templates.md`).
@@ -86,3 +89,14 @@ For code snippets and data examples inside technical diagrams. These dark boxes 
 | Property | Value |
 |----------|-------|
 | Canvas background | `#ffffff` for the editable file. Exports are transparent. |
+
+## Chart Series Colors
+
+Series order, used by both `xychart` and `pie` (fill, stroke):
+
+1. blue `#d0ebff` / `#1971c2`
+2. green `#d3f9d8` / `#2f9e44`
+3. orange `#ffec99` / `#f08c00`
+4. red `#ffe3e3` / `#e03131`
+5. purple `#eebefa` / `#9c36b5`
+6. grey `#f1f3f5` / `#868e96`
