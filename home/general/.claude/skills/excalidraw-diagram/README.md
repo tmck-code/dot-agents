@@ -8,7 +8,7 @@ Compatible with any coding agent that supports skills. For agents that read from
 
 - **Diagrams that argue, not display.** Every shape/group of shapes mirrors the concept it represents — fan-outs for one-to-many, timelines for sequences, convergence for aggregation. No uniform card grids.
 - **Evidence artifacts.** As an example, technical diagrams include real code snippets and actual JSON payloads.
-- **Built-in visual validation.** A Playwright-based render pipeline lets the agent see its own output, catch layout issues (overlapping text, misaligned arrows, unbalanced spacing), and fix them in a loop before delivering.
+- **Built-in visual validation.** A Playwright-based render pipeline (run in Docker) lets the agent see its own output, catch layout issues (overlapping text, misaligned arrows, unbalanced spacing), and fix them in a loop before delivering.
 - **Brand-customizable.** All colors and brand styles live in a single file (`references/color-palette.md`). Swap it out and every diagram follows your palette.
 
 ## Installation
@@ -31,10 +31,11 @@ Just tell your agent: *"Set up the Excalidraw diagram skill renderer by followin
 **Option B: Manual**
 
 ```bash
-cd .claude/skills/excalidraw-diagram/references
-uv sync
-uv run playwright install chromium
+cd .claude/skills/excalidraw-diagram
+docker build -t excalidraw-render .
 ```
+
+Rendering fetches Excalidraw and fonts from esm.sh, so it needs network access. SVG is written with `--svg path`; `--output` is for the PNG (`--output x.svg` fails with "Unsupported screenshot mime type"). Without Docker, run `uv run render_excalidraw.py ...` inside `references/`.
 
 ## Usage
 
@@ -43,6 +44,13 @@ Ask your coding agent to create a diagram:
 > "Create an Excalidraw diagram showing how the AG-UI protocol streams events from an AI agent to a frontend UI"
 
 The skill handles the rest — concept mapping, layout, JSON generation, rendering, and visual validation.
+
+The generator scripts can also be run directly:
+
+```bash
+python3 scripts/convert.py diagram.mmd diagram.excalidraw        # Mermaid to Excalidraw
+python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]
+```
 
 ## Customize Colors
 
@@ -53,11 +61,12 @@ Edit `references/color-palette.md` to match your brand. Everything else in the s
 ```
 excalidraw-diagram/
   SKILL.md                          # Design methodology + workflow
+  Dockerfile                        # Render image (docker build -t excalidraw-render .)
   references/
     color-palette.md                # Brand colors (edit this to customize)
     element-templates.md            # JSON templates for each element type
     json-schema.md                  # Excalidraw JSON format reference
-    render_excalidraw.py            # Render .excalidraw to PNG
+    render_excalidraw.py            # Render .excalidraw to PNG/SVG (Playwright)
     render_template.html            # Browser template for rendering
     pyproject.toml                  # Python dependencies (playwright)
 ```

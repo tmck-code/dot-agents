@@ -3,16 +3,19 @@
 
 Styled after the decision tree in a hand-drawn reference diagram:
 rounded rectangles with an 8px corner radius, a hand-drawn font, a saturated stroke over a matching pale
-fill, and the label in the stroke colour.
+fill, and the label in dark text (#1e1e1e).
 
 Imported by convert.py; not meant to be run directly.
 """
+import math
 import re
 import uuid
 
 FONT_FAMILY = 8  # Comic Shanns, as in the hand-drawn reference
 LABEL_FONT = 18.0
-EDGE_LABEL_FONT = 13.0
+EDGE_LABEL_FONT = 12.0
+EDGE_LABEL_CHAR_W = 0.6  # bound-label width factor: ceil(chars * font * this) + EDGE_LABEL_PAD_W
+EDGE_LABEL_PAD_W = 6
 LINE_H = 1.25
 CHAR_W = 0.58  # fraction of font size, for the hand-drawn face
 
@@ -24,34 +27,36 @@ DIAMOND_SCALE = 1.55  # a diamond needs more box to fit the same text
 
 COL_GAP = 150.0
 ROW_GAP_TD = 110.0     # tier gap once a TD layout is transposed; rows are shorter than columns are wide
-NODE_GAP = 46.0        # floor gap between stacked members (unlabelled edge)
+NODE_GAP = 60.0        # floor gap between stacked members (unlabelled edge)
 CLUSTER_GAP = 60.0
 CLUSTER_PAD = 28.0
 CLUSTER_STROKE = "#868e96"
-CLUSTER_TITLE_COLOR = "#495057"
+CLUSTER_TITLE_COLOR = "#868e96"
+CLUSTER_TITLE_FAMILY = 5  # Excalifont, for titles
 CLUSTER_TITLE_FONT = 16.0
 TITLE_TEXT_H = CLUSTER_TITLE_FONT * LINE_H   # 20, as in the reference
 TITLE_GAP = 10.0       # air between a title's box and the container top edge
 
 EDGE_LABEL_WRAP = 24   # chars; long edge labels are wrapped to this width
-LABEL_PAD = 18.0       # air around an edge label inside the gap it must fit
+LABEL_PAD = 20.0       # air around an edge label inside the gap it must fit
 
 ROUTE_MARGIN = 14.0    # obstacles are inflated by this before routing
 ROUTE_RING = 40.0      # how far outside the diagram bbox the outer lanes run
 TURN_PENALTY = 60.0    # cost of an elbow, so routes prefer few of them
 
-EDGE_COLOR = "#1e1e1e"
-EDGE_LABEL_COLOR = "#495057"
-DEFAULT_STYLE = ("#495057", "#f8f9fa")
+EDGE_COLOR = "#868e96"
+EDGE_LABEL_COLOR = "#868e96"
+NODE_TEXT_COLOR = "#1e1e1e"  # text inside filled shapes
+DEFAULT_STYLE = ("#868e96", "#f1f3f5")
 
 # (stroke, fill) pairs, cycled over nodes that no classDef claims
 PALETTE = [
-    ("#a855f7", "#f3e8ff"),
-    ("#0ea5e9", "#e0f2fe"),
-    ("#22c55e", "#dcfce7"),
-    ("#f59e0b", "#fef3c7"),
-    ("#6366f1", "#e0e7ff"),
-    ("#ef4444", "#fee2e2"),
+    ("#9c36b5", "#eebefa"),
+    ("#1971c2", "#d0ebff"),
+    ("#2f9e44", "#d3f9d8"),
+    ("#f08c00", "#ffec99"),
+    ("#4263eb", "#dbe4ff"),
+    ("#e03131", "#ffe3e3"),
 ]
 
 # mermaid shape delimiters -> (excalidraw type, rounded?)
@@ -127,6 +132,14 @@ def text_size(text, font):
             len(lines) * font * LINE_H)
 
 
+def edge_label_size(text):
+    """(width, height) of a bound edge label, matching what excalidraw measures."""
+    lines = text.split("\n")
+    width = math.ceil(max(len(l) for l in lines) * EDGE_LABEL_FONT * EDGE_LABEL_CHAR_W)
+    height = len(lines) * math.ceil(EDGE_LABEL_FONT * LINE_H)
+    return width + EDGE_LABEL_PAD_W, height
+
+
 def parse_shape(token):
     """Split `ID[(label)]` into (node_id, excalidraw type, rounded, label)."""
     m = re.match(r'^(\w+)(.*)$', token.strip())
@@ -171,7 +184,7 @@ class Cluster:
 
 
 def parse_style(decl):
-    """`fill:#eee,stroke:#333,stroke-width:2px` -> dict."""
+    """`fill:#f1f3f5,stroke:#868e96,stroke-width:2px` -> dict."""
     out = {}
     for part in decl.replace(";", ",").split(","):
         if ":" not in part:
@@ -308,7 +321,7 @@ def resolve_styles(nodes, classdefs):
 def size_node(node):
     lines = node.lines
     text_w = max(len(l) for l in lines) * LABEL_FONT * CHAR_W
-    text_h = len(lines) * LABEL_FONT * LINE_H
+    text_h = math.ceil(len(lines) * LABEL_FONT * LINE_H)
     width = max(MIN_NODE_W, text_w + 2 * NODE_PAD_X)
     height = max(MIN_NODE_H, text_h + 2 * NODE_PAD_Y)
     if node.kind == "diamond":
@@ -428,7 +441,7 @@ def layout(nodes, edges, clusters, vertical=False):
         along_x = vertical or _FLOW_AXIS == "y"
         for edge in edges:
             if {edge["a"], edge["b"]} == {top, bottom} and edge["label"]:
-                label_w, label_h = text_size(edge["label"], EDGE_LABEL_FONT)
+                label_w, label_h = edge_label_size(edge["label"])
                 gap = max(gap, (label_w if along_x else label_h) + 2 * LABEL_PAD)
         return gap
 
@@ -464,7 +477,7 @@ def layout(nodes, edges, clusters, vertical=False):
         ca, cb = cols[owner[edge["a"]]], cols[owner[edge["b"]]]
         if ca == cb or not edge["label"]:
             continue
-        label_w, label_h = text_size(edge["label"], EDGE_LABEL_FONT)
+        label_w, label_h = edge_label_size(edge["label"])
         need = (label_h if vertical else label_w) + 2 * LABEL_PAD + 2 * ROUTE_MARGIN
         boundary = min(ca, cb)
         gutters[boundary] = max(gutters.get(boundary, COL_GAP), need)
@@ -492,21 +505,23 @@ def layout(nodes, edges, clusters, vertical=False):
             else:
                 group.x, group.y = g_tier_pos, g_cross_pos
             inner_cross = g_cross_pos + (0 if group.title is None else CLUSTER_PAD)
-            inner_cross_extent = (group_cross(group)
-                                  - (0 if group.title is None else 2 * CLUSTER_PAD))
-            node_tier = g_tier_pos + (0 if group.title is None else CLUSTER_PAD)
+            inner_tier = g_tier_pos + (0 if group.title is None else CLUSTER_PAD)
+            inner_tier_extent = (group_tier(group)
+                                 - (0 if group.title is None else 2 * CLUSTER_PAD))
+            # members stack along the cross axis, centred on the tier axis
+            node_cross = inner_cross
             for slot, member in enumerate(group.members):
                 node = nodes[member]
                 node.slot = slot
                 node.group = group
-                nc = inner_cross + (inner_cross_extent - cross_extent(node)) / 2.0
+                nt = inner_tier + (inner_tier_extent - tier_extent(node)) / 2.0
                 if vertical:
-                    node.y, node.x = node_tier, nc
+                    node.y, node.x = nt, node_cross
                 else:
-                    node.x, node.y = node_tier, nc
-                node_tier += tier_extent(node)
+                    node.x, node.y = nt, node_cross
+                node_cross += cross_extent(node)
                 if slot < len(group.gaps):
-                    node_tier += group.gaps[slot]
+                    node_cross += group.gaps[slot]
             cross += group_cross(group) + CLUSTER_GAP
         tier_pos += col_tier + gutters.get(col, COL_GAP)
     return groups
@@ -528,11 +543,11 @@ def _base(el_id, el_type, x, y, width, height, **extra):
 
 
 def _text(text, x, y, width, height, color, font_size, align="center",
-          valign="top", **extra):
+          valign="top", family=FONT_FAMILY, **extra):
     return _base(
         new_id(), "text", x, y, width, height,
         strokeColor=color, strokeWidth=1, text=text, originalText=text,
-        fontSize=font_size, fontFamily=FONT_FAMILY, textAlign=align,
+        fontSize=font_size, fontFamily=family, textAlign=align,
         verticalAlign=valign, containerId=None, autoResize=False,
         lineHeight=LINE_H, **extra
     )
@@ -551,7 +566,8 @@ def make_cluster(group):
                 roundness={"type": 3, "value": 12})
     tx, ty, tw, th = title_rect(group)
     title = _text(group.title, tx, ty, tw, th,
-                  CLUSTER_TITLE_COLOR, CLUSTER_TITLE_FONT, align="left")
+                  CLUSTER_TITLE_COLOR, CLUSTER_TITLE_FONT, align="left",
+                  family=CLUSTER_TITLE_FAMILY)
     return [box, title]
 
 
@@ -567,9 +583,9 @@ def make_node(node):
                    and node.kind == "rectangle" else None),
         boundElements=[{"type": "text", "id": label_id}],
     )
-    text_h = len(node.lines) * LABEL_FONT * LINE_H
+    text_h = math.ceil(len(node.lines) * LABEL_FONT * LINE_H)
     label = _text(node.label, node.x + 5, node.y + (node.height - text_h) / 2.0,
-                  node.width - 10, text_h, stroke, LABEL_FONT, valign="middle")
+                  node.width - 10, text_h, NODE_TEXT_COLOR, LABEL_FONT, valign="middle")
     label["id"] = label_id
     label["containerId"] = shape_id
     return [shape, label]
@@ -716,8 +732,62 @@ def route(a, b, obstacles, bbox):
     return best_path
 
 
-def make_edge(a, b, edge, style, obstacles, bbox):
+_PLACED = []  # polylines of arrows already emitted, for label clearance
+_LABELS = []  # boxes of labels already emitted
+
+
+def _seg_in_box(seg, box):
+    """True when an axis-aligned segment touches `box` (x0, y0, x1, y1)."""
+    (x0, y0), (x1, y1) = seg
+    sx0, sx1 = sorted((x0, x1))
+    sy0, sy1 = sorted((y0, y1))
+    return not (sx1 < box[0] or sx0 > box[2] or sy1 < box[1] or sy0 > box[3])
+
+
+def _label_midpoint(points, label_w, label_h):
+    """Box of a bound label as excalidraw places it: on the middle vertex of
+    an odd-length point list, else on the middle of the middle segment."""
+    n = len(points)
+    if n % 2:
+        cx, cy = points[n // 2]
+    else:
+        p, q = points[n // 2 - 1], points[n // 2]
+        cx, cy = (p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0
+    return (cx - label_w / 2.0, cy - label_h / 2.0,
+            cx + label_w / 2.0, cy + label_h / 2.0)
+
+
+def _route_clear(a, b, edge, obstacles, bbox):
+    """Route, then keep the label box off arrows already placed.
+
+    Excalidraw re-places a bound label at the route midpoint, so the label
+    cannot move; the route is re-planned instead, steering around any placed
+    arrow segment the label box would touch (the segment inflated by half the
+    label size becomes an obstacle), and around labels already placed.
+    """
+    obstacles = obstacles + [_inflate((x0, y0, x1 - x0, y1 - y0), ROUTE_MARGIN)
+                             for x0, y0, x1, y1 in _LABELS]
     points = route(a, b, obstacles, bbox)
+    if not edge["label"]:
+        return points
+    label_w, label_h = edge_label_size(edge["label"])
+    for _ in range(3):
+        box = _label_midpoint(points, label_w, label_h)
+        hit = [sg for pl in _PLACED for sg in zip(pl, pl[1:])
+               if _seg_in_box(sg, (box[0] - 3, box[1] - 3, box[2] + 3, box[3] + 3))]
+        if not hit:
+            break
+        extra = []
+        for (x0, y0), (x1, y1) in hit:
+            extra.append((min(x0, x1) - label_w / 2.0, min(y0, y1) - label_h / 2.0,
+                          max(x0, x1) + label_w / 2.0, max(y0, y1) + label_h / 2.0))
+        obstacles = obstacles + extra
+        points = route(a, b, obstacles, bbox)
+    return points
+
+
+def make_edge(a, b, edge, style, obstacles, bbox):
+    points = _route_clear(a, b, edge, obstacles, bbox)
     sx, sy = points[0]
     ex, ey = points[-1]
     stroke = style.get("stroke", EDGE_COLOR)
@@ -740,40 +810,22 @@ def make_edge(a, b, edge, style, obstacles, bbox):
     )
     els = [arrow]
     if edge["label"]:
-        # midpoint of the longest segment that runs along the flow axis (the
-        # tier gutter is the only place on a multi-elbow route with room for
-        # the label); any segment if the route has none
-        def seg_len(s):
-            return abs(s[1][0] - s[0][0]) + abs(s[1][1] - s[0][1])
-
-        segs = list(zip(points, points[1:]))
-        along = [s for s in segs
-                 if (abs(s[1][1] - s[0][1]) if _FLOW_AXIS == "y"
-                     else abs(s[1][0] - s[0][0])) > 0.01]
-        label_w, label_h = text_size(edge["label"], EDGE_LABEL_FONT)
-        need = (label_h if _FLOW_AXIS == "y" else label_w) + LABEL_PAD
-        # nearest the target first: on a fan-out the legs diverge there, so
-        # sibling labels stay apart; fall back to the longest run
-        roomy = [s for s in along if seg_len(s) >= need]
-        seg = roomy[-1] if roomy else max(along or segs, key=seg_len)
-        lx = (seg[0][0] + seg[1][0]) / 2.0
-        ly = (seg[0][1] + seg[1][1]) / 2.0
-        # sit the label beside the line, not across it (the exporter draws no
-        # background behind bound text): above a horizontal run, right of a
-        # vertical one
-        if abs(seg[1][1] - seg[0][1]) < 0.01:
-            ly -= label_h / 2.0 + 4.0
-        else:
-            lx += label_w / 2.0 + 6.0
-        # free text, not bound to the arrow: excalidraw snaps a bound label to
-        # the arrow's middle segment, which on an elbowed route is the bus or
-        # a corner, not the run with room for it
+        label_w, label_h = edge_label_size(edge["label"])
+        # excalidraw centres a bound label on the middle of the point list
+        bx0, by0, bx1, by1 = _label_midpoint(points, label_w, label_h)
+        lx, ly = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
         label = _text(
             edge["label"], lx - label_w / 2.0, ly - label_h / 2.0,
             label_w, label_h,
             EDGE_LABEL_COLOR, EDGE_LABEL_FONT, valign="middle",
         )
+        label["containerId"] = arrow["id"]
+        arrow["boundElements"].append({"type": "text", "id": label["id"]})
         els.append(label)
+    _PLACED.append(points)
+    if edge["label"]:
+        _LABELS.append((lx - label_w / 2.0, ly - label_h / 2.0,
+                        lx + label_w / 2.0, ly + label_h / 2.0))
     return els
 
 
@@ -815,6 +867,8 @@ def _transpose(nodes, groups):
 
 
 def convert_flowchart(text):
+    _PLACED.clear()
+    _LABELS.clear()
     nodes, edges, clusters, classdefs, linkstyles = parse_flowchart(text)
     resolve_styles(nodes, classdefs)
     m = DIRECTIVE_RE.search(text)
@@ -844,7 +898,13 @@ def convert_flowchart(text):
             max(r[0] + r[2] for r in rects), max(r[1] + r[3] for r in rects))
 
     bound = {nid: [] for nid in nodes}
-    for idx, edge in enumerate(edges):
+    # widest label first: its box is fixed (excalidraw re-places bound labels
+    # at the route midpoint), so narrower-label arrows route around it
+    def _label_width(item):
+        label = item[1]["label"]
+        return -max((len(l) for l in label.split("\n")), default=0)
+
+    for idx, edge in sorted(enumerate(edges), key=_label_width):
         a, b = nodes[edge["a"]], nodes[edge["b"]]
         # every box but the two endpoints blocks the route; so does any titled
         # container that belongs to neither endpoint (an edge may leave its own

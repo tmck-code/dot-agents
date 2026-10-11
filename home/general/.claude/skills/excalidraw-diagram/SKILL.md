@@ -356,6 +356,13 @@ Colors encode information, not decoration. Every color choice should come from `
 - Evidence artifacts (code snippets, JSON examples) use their own dark background + colored text scheme
 - Always pair a darker stroke with a lighter fill for contrast
 
+Each pair also has a paler Secondary fill in `references/color-palette.md`. Use it for less important nodes of the same concept instead of a new hue.
+
+Colors are Open Color pastel fills with darker strokes. `references/color-palette.md` has the hex values. Diagrams must work on light and dark pages, so:
+- No pure black or pure white fills.
+- Free text, arrow strokes, arrow labels, frame outlines and unfilled containers use `#868e96`.
+- Text inside a filled shape uses `#1e1e1e`.
+
 **Do not invent new colors.** If a concept doesn't fit an existing semantic category, use Primary/Neutral or Secondary.
 
 ---
@@ -367,21 +374,56 @@ pipeline" (`AGdGHYQB3tL`). Apply to any diagram with boxes/ovals connected by
 arrows — flowcharts, ER diagrams, sequence/state/class diagrams. Does not
 apply to pure charts (pie, xychart-beta) or mindmaps.
 
-- **Arrows**: `strokeColor: "#1e1e1e"` (near-black, not a semantic color),
-  `strokeStyle: "solid"`, `startArrowhead: null`, `endArrowhead: "triangle"`.
+- **Arrows**: elbow arrows by default (`elbowed: true`; use a straight arrow
+  only when the route is a single straight run). `strokeColor: "#868e96"`,
+  `strokeWidth: 2`, `strokeStyle: "solid"`, `startArrowhead: null`,
+  `endArrowhead: "triangle"`. Use `strokeStyle: "dashed"` (same head) for
+  return paths, loop-backs and optional or async flows. Keep solid for the
+  main path.
+- **Arrow labels**: bind the label to its arrow. Set the text's `containerId`
+  to the arrow id and list the text in the arrow's `boundElements`. Size the
+  label box to the text (`width = ceil(chars * fontSize * 0.6) + 6`,
+  `height = ceil(fontSize * 1.25)`) and centre it on the arrow midpoint, or the
+  line shows through the text. Label
+  color is `#868e96`. Put qualifiers (conditions, rule names) here, not in
+  the target box.
+- **Rounded corners**: every rectangle has `roundness: {"type": 3}`.
+- **Group containers**: thin dashed grey outline (`strokeStyle: "dashed"`,
+  `strokeColor: "#868e96"`, `strokeWidth: 1`, `backgroundColor: "transparent"`),
+  not a filled lane or group box.
 - **Every arrow must be bound on both ends** — real `startBinding`/`endBinding`
   objects with a `fixedPoint` tuple and `mode` (`"orbit"` for arrows
   approaching a shape from outside; `"inside"` when the endpoint lands inside/
-  overlapping the target, e.g. a label box nested in a larger box). No
-  floating arrow endpoints, no arrows merely positioned near a shape.
+  overlapping the target, e.g. a label box nested in a larger box). Leave a
+  6 px gap between the arrow end and the shape. No floating arrow endpoints,
+  no arrows merely positioned near a shape.
 - **Background/async job boxes** (a Databricks job, a queue worker, any
-  "runs later / not inline" process box): use a sufficiently dark background
-  fill paired with white (`#ffffff`) text — light fills read poorly for this
-  category and get flagged.
+  "runs later / not inline" process box): use a dashed stroke on a palette
+  fill. Do not use a black or dark fill.
+- **Offset shadow**: behind every filled node rectangle that holds text, add a
+  duplicate rectangle with the same size and roundness, offset +6 px in x and
+  y. Set its `backgroundColor` and `strokeColor` both to the shape's stroke
+  color, `fillStyle: "solid"`, `strokeWidth: 1`, `opacity: 80`. It has no text
+  and no bindings. It shares the shape's `groupIds`. Place it immediately
+  before its shape in `elements`, with an `index` that sorts just before the
+  shape's. Skip legend swatches, full-width bands, the bottom summary box, and
+  dashed or unfilled shapes. Any filled shape type that holds text gets a
+  shadow (not only rectangles). To add shadows in bulk:
+  `python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]`.
+  The script skips legend swatches (size 26x20).
+- **Legend**: every diagram has one, top-right by default. If that area holds a
+  node, arrow or header, use the nearest free corner. One 26x20 swatch per concept,
+  with its label in `#868e96`. Swatches have no shadow.
+- **Node layout**: rule boxes hold only a title and a one-line summary. Top-align
+  boxes on a row. Gaps: 20 px between boxes on one row with no arrow between
+  them. Where an arrow runs between shapes, the gap fits 6 px + arrow + 6 px.
+  For a labelled arrow, the gap is label width + about 40 px. Minimum 60 px
+  for an unlabelled arrow. Size boxes to text plus padding (see Layout
+  Principles); do not stretch them.
 - **Well-known systems get their real symbol, not a text label.** E.g.
   Elasticsearch/OpenSearch nodes are drawn as the actual multi-color Elastic
-  logo (bent-line shape in the brand palette: `#f4bd19`, `#3cbeb1`,
-  `#e9478c`, `#2c458f`, `#95c63d`, `#176655`) rather than a box labeled "ES".
+  logo (bent-line shape in the palette colours from `color-palette.md`)
+  rather than a box labeled "ES".
   Reuse this pattern for other recognizable third-party systems where a
   simple brand mark exists.
 - After hand-edits land in the live collection, re-fetch via `GET
@@ -401,12 +443,12 @@ For clean, professional diagrams:
 **Default to 0** for most professional use cases.
 
 ### Stroke Width
-- `strokeWidth: 1` — Thin, elegant. Good for lines, dividers, subtle connections.
-- `strokeWidth: 2` — Standard. Good for shapes and primary arrows.
-- `strokeWidth: 3` — Bold. Use sparingly for emphasis (main flow line, key connections).
+- `strokeWidth: 1` — Thin. Dashed group containers, shadows, dividers.
+- `strokeWidth: 2` — Standard. Shapes and all arrows.
+- `strokeWidth: 4` — Bold. Use sparingly for emphasis.
 
 ### Opacity
-**Always use `opacity: 100` for all elements.** Use color, size, and stroke width to create hierarchy instead of transparency.
+**Use `opacity: 100` for all elements except offset shadows (`opacity: 80`).** Use color, size, and stroke width to create hierarchy instead of transparency.
 
 ### Small Markers Instead of Shapes
 Instead of full shapes, use small dots (10-20px ellipses) as:
@@ -425,11 +467,18 @@ Instead of full shapes, use small dots (10-20px ellipses) as:
 - **Secondary**: 120×60
 - **Small**: 60×40
 
+These are reference sizes. Size each box to its text plus padding: 20 px each side horizontally, 12 px vertically. Do not stretch boxes to a size.
+
 ### Whitespace = Importance
 The most important element has the most empty space around it (200px+).
 
 ### Flow Direction
 Guide the eye: typically left→right or top→bottom for sequences, radial for hub-and-spoke.
+
+### Spacing Minimums
+- Gap between nodes: at least one node height (one node width for horizontal flow). Exception: boxes in one top-aligned row use 20 px gaps.
+- Padding between text and shape edge: at least 20 px horizontal, 12 px vertical.
+- Aim for about 10 nodes per diagram. Beyond that, split into sections or frames.
 
 ### Connections Required
 Position alone doesn't show relationships. If A relates to B, there must be an arrow.
@@ -448,7 +497,15 @@ Position alone doesn't show relationships. If A relates to B, there must be an a
 }
 ```
 
-Settings: `fontSize: 16`, `fontFamily: 3`, `textAlign: "center"`, `verticalAlign: "middle"`
+Settings: `fontSize: 16`, `fontFamily: 8` (Comic Shanns), `textAlign: "center"`, `verticalAlign: "middle"`
+
+**Type scale**: use four sizes per diagram and no others. Same size for all labels of one level.
+- 28: chart title (`fontFamily: 5`, Excalifont)
+- 20: section or row title (`fontFamily: 5`, Excalifont)
+- 16: node label
+- 12 to 13: annotation, arrow label, legend
+
+Use `fontFamily: 8` (Comic Shanns) for all other text. Never use `fontFamily: 3`.
 
 ---
 
@@ -467,6 +524,23 @@ Settings: `fontSize: 16`, `fontFamily: 3`, `textAlign: "center"`, `verticalAlign
   "files": {}
 }
 ```
+
+Editable files use `#ffffff` as `viewBackgroundColor`. A cream scene background set by the user in Excalidraw+ is kept on re-upload.
+
+## Arrow Labels and Elbow Arrows
+
+- A labelled arrow segment must be at least label width + 40 px long.
+- For elbow arrows, the renderer places the bound label at the middle vertex (middle segment) of `points`. It re-routes elbow arrows from `fixedPoint`, so `points` are only a hint.
+- Fan-out arrows from one box need distinct segment positions, so their bends and labels do not overlap.
+- Self-loops: use an unbound label beside the loop. This is the exception to the bound-label rule.
+
+## Sequence Diagrams
+
+- Draw lifelines as narrow rectangles so arrows can bind to them. Or use lines split around labels.
+- Put notes above the lifelines.
+- Loop and par frames are dashed `#868e96` rectangles with a tab label.
+- Actor boxes appear only at the top.
+- Return arrows are dashed, not dotted.
 
 ## Element Templates
 
@@ -546,11 +620,36 @@ You cannot judge a diagram from JSON alone. After generating or editing the Exca
 
 ### How to Render
 
+Build the image once, from the skill directory:
+
 ```bash
-cd .claude/skills/excalidraw-diagram/references && uv run python render_excalidraw.py <path-to-file.excalidraw>
+docker build -t excalidraw-render .
 ```
 
-This outputs a PNG next to the `.excalidraw` file. Then use the **Read tool** on the PNG to actually view it.
+Render from the directory that holds the diagram:
+
+```bash
+docker run --rm -u "$(id -u):$(id -g)" -e HOME=/tmp -v "$PWD:/data" excalidraw-render in.excalidraw --output out.png [--scale 1] [--width N] [--transparent] [--dark] [--svg out.svg]
+```
+
+- `--scale` defaults to 1. Use 2 for higher resolution.
+- An SVG is written beside the PNG with the same stem. `--svg path` sets another path. `--output` is for the PNG only; `--output x.svg` fails with "Unsupported screenshot mime type".
+- `--transparent` removes the background and keeps alpha.
+- `--dark` is a true dark render (Excalidraw `exportWithDarkMode`).
+- Rendering fetches Excalidraw and fonts from esm.sh, so it needs network access.
+- Without Docker: run `uv run render_excalidraw.py ...` inside `references/`.
+
+Then use the **Read tool** on the PNG to view it.
+
+**Transparent background (only when asked):** if the user wants an image that works on both light and dark pages (README, docs site with a theme toggle), export with `--transparent`.
+
+A transparent export has no canvas, so the diagram itself must work on either background:
+- Use grey `#868e96` for everything drawn with no fill behind it: free text, arrow and line strokes, arrow labels, frame outlines, unfilled containers and their text.
+- Text inside a filled shape is `#1e1e1e`.
+- No pure-black or pure-white fills. Replace a `#1e1e1e` band with a palette fill (for example green `#d3f9d8` / `#2f9e44`).
+- These rules apply to every diagram, not only transparent exports.
+- Legibility check for `--transparent`: run `magick out.png -background '#121212' -flatten check.png` and view `check.png`.
+- `--dark` is a true dark render, so the diagram can also be checked by rendering with `--dark` and viewing it.
 
 ### The Loop
 
@@ -597,11 +696,9 @@ The loop is done when:
 - You'd be comfortable showing it to someone without caveats
 
 ### First-Time Setup
-If the render script hasn't been set up yet:
+If the render image has not been built yet, run this from the skill directory:
 ```bash
-cd .claude/skills/excalidraw-diagram/references
-uv sync
-uv run playwright install chromium
+docker build -t excalidraw-render .
 ```
 
 ---
@@ -633,9 +730,9 @@ uv run playwright install chromium
 
 ### Technical
 16. **Text clean**: `text` contains only readable words
-17. **Font**: `fontFamily: 3`
+17. **Font**: `fontFamily: 8` for body text, `5` for the chart title and row/section titles; no `fontFamily: 3`
 18. **Roughness**: `roughness: 0` for clean/modern (unless hand-drawn style requested)
-19. **Opacity**: `opacity: 100` for all elements (no transparency)
+19. **Opacity**: `opacity: 100` for all elements except offset shadows (`80`)
 20. **Container ratio**: <30% of text elements should be inside containers
 
 ### Visual Validation (Render Required)
@@ -646,3 +743,4 @@ uv run playwright install chromium
 25. **Arrows land correctly**: Arrows connect to intended elements without crossing others
 26. **Readable at export size**: Text is legible in the rendered PNG
 27. **Balanced composition**: No large empty voids or overcrowded regions
+28. **Spacing minimums**: Node gaps at least one node height (20 px between boxes in one top-aligned row); text padding at least 20 px horizontal by 12 px vertical; about 10 nodes or fewer per diagram

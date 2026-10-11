@@ -2,10 +2,10 @@
 
 Styling was reverse-engineered from a conversion of this skill's own example
 diagram made by Excalidraw's *own* mermaid importer (`sequence.excalidraw`):
-grey-filled participant headers repeated as a mirrored footer row, thin `#999`
-lifelines, horizontal 2-point arrows with bound labels, dashed `#EDF2AE`
-notes, a background rectangle for `rect <colour>`, and dotted `#adb5bd`
-four-line frames with a keyword tab for `par`/`loop`/`alt`/`opt`.
+grey-filled participant headers (top only, no footer row), thin `#868e96`
+lifelines, horizontal 2-point arrows with bound labels, dashed `#fff9db`
+notes, a background rectangle for `rect <colour>`, and dashed `#868e96`
+rectangle frames with a keyword tab for `par`/`loop`/`alt`/`opt`.
 
 Three things that reference gets wrong are deliberately *not* reproduced: it
 keeps `<br/>` as literal text (here it becomes a real newline), it drops
@@ -15,6 +15,7 @@ is documented as a limitation instead).
 
 Imported by convert.py; not meant to be run directly.
 """
+import math
 import re
 
 from convert import _base, new_id  # noqa: E402  (sibling module)
@@ -31,6 +32,11 @@ SEQ_CHAR_W = 0.58            # * font size, the wider Comic Shanns face (as in
                              # flowchart.py); the reference's 0.55 was Excalifont
                              # and left message labels crowding the lifelines
 
+SEQ_LABEL_FONT = 12          # message labels (bound to their arrow)
+SEQ_LABEL_CHAR_W = 0.6       # * font size: a Comic Shanns glyph's advance width
+SEQ_LABEL_PAD_W = 6          # added to the text width for the label box
+SEQ_MASK_PAD = 4.0           # lifelines stop this far short of a label box
+
 SEQ_HEADER_H = 65.0          # a one-line participant header
 SEQ_HEADER_LINE_H = 14.6     # each extra label line grows the box by this,
 SEQ_HEADER_LINE_UP = 9.6     # of which this much is added above the band
@@ -43,7 +49,7 @@ SEQ_GAP = 42.0               # vertical air between two stacked items
 SEQ_MSG_H = 20.0             # a one-line message label
 SEQ_MSG_LINE_H = 26.0        # each extra label line
 SEQ_SELF_H = 60.0            # a self-message's minimum vertical footprint
-SEQ_FOOTER_GAP = 20.0        # last item -> the mirrored footer band
+SEQ_FOOTER_GAP = 20.0        # last item -> lifeline end (no footer row is drawn)
 
 SEQ_NOTE_H = 42.0            # a one-line note
 SEQ_NOTE_LINE_H = 28.75
@@ -65,22 +71,23 @@ SEQ_TAB_H = 59.7
 SEQ_TAB_UP = 29.7            # how much of the tab sits above the top line
 SEQ_TAB_MIN_W = 35.0
 SEQ_TAB_PAD_X = 12.0
+SEQ_TAB_CLEAR = 8.0           # tab's right edge to the lifeline
 
 SEQ_ARROW_START = 1.5        # a message leaves its source lifeline by this,
 SEQ_ARROW_END = 4.5          # and stops this far short of the target's
 SEQ_SELF_POINTS = [[0.0, 0.0], [60.5, -9.5], [60.5, 30.5], [1.0, 21.0]]
-SEQ_SELF_LABEL_DX = 67.5
+SEQ_SELF_LABEL_DX = 76.0
 SEQ_SELF_LABEL_DY = 10.49
 SEQ_SELF_MARGIN = 90.0       # gutter a self-message's label needs to its right
 
-SEQ_HEADER_STROKE = "#666"
-SEQ_HEADER_FILL = "#eaeaea"
-SEQ_LIFELINE = "#999"
-SEQ_NOTE_FILL = "#EDF2AE"
-SEQ_FRAME_STROKE = "#adb5bd"
-SEQ_TAB_FILL = "#e9ecef"
-SEQ_TEXT = "#1e1e1e"
-SEQ_LABEL_TEXT = "#000"
+SEQ_HEADER_STROKE = "#868e96"
+SEQ_HEADER_FILL = "#f1f3f5"
+SEQ_LIFELINE = "#868e96"
+SEQ_NOTE_FILL = "#fff9db"
+SEQ_FRAME_STROKE = "#868e96"
+SEQ_TAB_FILL = "#f1f3f5"
+SEQ_TEXT = "#868e96"   # free text, arrows, unfilled strokes
+SEQ_LABEL_TEXT = "#1e1e1e"   # text inside filled shapes
 
 # actor stick figure, all offsets from (cx, band_top)
 SEQ_ACTOR_HEAD = 30.0
@@ -91,8 +98,7 @@ SEQ_ACTOR_ARM_W = 36.0
 SEQ_ACTOR_HIP_DY = 45.0
 SEQ_ACTOR_FOOT_DY = 60.0
 SEQ_ACTOR_NAME_DY = 67.5
-SEQ_ACTOR_LIFELINE_DY = 80.0
-SEQ_ACTOR_FOOTER_LIFT = 5.0
+SEQ_ACTOR_LIFELINE_DY = 98.0
 
 DIRECTIVE_RE = re.compile(r'^sequenceDiagram\b')
 AUTONUMBER_RE = re.compile(r'^autonumber\b')
@@ -136,6 +142,13 @@ def text_size(text, font):
     lines = text.split("\n") or [""]
     return (max(len(l) for l in lines) * font * SEQ_CHAR_W,
             len(lines) * font * SEQ_LINE_H)
+
+
+def label_size(text, font=SEQ_LABEL_FONT):
+    """(width, height) of a message label box: ceil(chars * font * 0.6) + 6."""
+    lines = text.split("\n")
+    width = math.ceil(max(len(l) for l in lines) * font * SEQ_LABEL_CHAR_W)
+    return width + SEQ_LABEL_PAD_W, math.ceil(font * SEQ_LINE_H) * len(lines)
 
 
 def wrap_text(text, width, font):
@@ -252,7 +265,7 @@ def _collect_spans(events, spans, n):
     for event in events:
         if event[0] == "msg":
             _, src, dst, _, label = event
-            width = text_size(label, SEQ_FONT)[0] if label else 0.0
+            width = label_size(label)[0] if label else 0.0
             if src is dst:
                 if src.index < n - 1:
                     spans.append((src.index, src.index + 1,
@@ -323,7 +336,7 @@ def _text(text, x, y, width, font, align="center", valign="middle",
           color=SEQ_TEXT, container=None, family=SEQ_FONT_FAMILY):
     lines = text.count("\n") + 1
     return _base(
-        new_id(), "text", x, y, width, font * SEQ_LINE_H * lines, [],
+        new_id(), "text", x, y, width, math.ceil(font * SEQ_LINE_H * lines), [],
         strokeColor=color, backgroundColor="transparent", roughness=1,
         text=text, originalText=text, fontSize=font,
         fontFamily=family, textAlign=align, verticalAlign=valign,
@@ -353,6 +366,19 @@ def _line(x, y, points, color, style="solid", width=1):
         startBinding=None, endBinding=None, startArrowhead=None,
         endArrowhead=None, polygon=False, boundElements=None,
     )
+
+
+def _lifeline(cx, top, bottom, obstacles):
+    """Vertical line segments from top to bottom, broken around label boxes."""
+    cuts = sorted((y0, y1) for x0, x1, y0, y1 in obstacles if x0 < cx < x1)
+    out = []
+    y = top
+    for y0, y1 in cuts:
+        if y0 > y:
+            out.append(_line(cx, y, [[0.0, 0.0], [0.0, y0 - y]], SEQ_LIFELINE))
+        y = max(y, y1)
+    out.append(_line(cx, y, [[0.0, 0.0], [0.0, bottom - y]], SEQ_LIFELINE))
+    return out
 
 
 def _header_geometry(part, band_top):
@@ -390,7 +416,7 @@ def _actor(part, band_top, anchor_id):
     ]
     els = [head]
     for x, y, points in strokes:
-        el = _line(x, y, points, SEQ_LABEL_TEXT)
+        el = _line(x, y, points, SEQ_TEXT)
         el["groupIds"] = group
         els.append(el)
     name_w = text_size(part.label, SEQ_TITLE_FONT)[0]
@@ -416,6 +442,7 @@ class Layout:
         self.messages = []
         self.frames = []
         self.tabs = []
+        self.obstacles = []   # (x0, x1, y0, y1) boxes lifelines must not cross
         self.extents = []   # stack of open containers
         self.depth = 0      # block-frame nesting depth
 
@@ -451,7 +478,7 @@ def _place_message(event, cursor, ctx):
     _, src, dst, dotted, label = event
     label = ctx.number(label)
     lines = label.count("\n") + 1 if label else 1
-    style = "dotted" if dotted else "solid"
+    style = "dashed" if dotted else "solid"
     top = cursor + SEQ_GAP
 
     if src is dst:
@@ -469,11 +496,12 @@ def _place_message(event, cursor, ctx):
         src.bound.append(arrow["id"])
         width = 0.0
         if label:
-            width = text_size(label, SEQ_FONT)[0]
+            # a bound label would be re-centred on the loop's far edge and sit
+            # on the arrow, so a self-message label is free text to its right
+            width, height = label_size(label)
             text = _text(label, src.cx + SEQ_SELF_LABEL_DX,
-                         y + SEQ_SELF_LABEL_DY, width, SEQ_FONT,
-                         container=arrow["id"])
-            arrow["boundElements"] = [{"type": "text", "id": text["id"]}]
+                         y + SEQ_SELF_LABEL_DY + 10 - height / 2, width,
+                         SEQ_LABEL_FONT, align="left")
             ctx.messages.append(text)
         ctx.mark(src.cx, src.cx + SEQ_SELF_LABEL_DX + width, src)
         return top + max(SEQ_SELF_H, SEQ_MSG_H * (lines + 1))
@@ -496,12 +524,16 @@ def _place_message(event, cursor, ctx):
     src.bound.append(arrow["id"])
     dst.bound.append(arrow["id"])
     if label:
-        width = text_size(label, SEQ_FONT)[0]
-        text = _text(label, (x0 + x1) / 2 - width / 2,
-                     y - SEQ_MSG_H * lines / 2, width, SEQ_FONT,
-                     container=arrow["id"])
+        width, height = label_size(label)
+        mid = (x0 + x1) / 2
+        text = _text(label, mid - width / 2, y - height / 2, width,
+                     SEQ_LABEL_FONT, container=arrow["id"])
+        text["height"] = height
         arrow["boundElements"] = [{"type": "text", "id": text["id"]}]
         ctx.messages.append(text)
+        ctx.obstacles.append((mid - width / 2 - SEQ_MASK_PAD,
+                              mid + width / 2 + SEQ_MASK_PAD,
+                              y - height / 2, y + height / 2))
     ctx.mark(min(x0, x1), max(x0, x1), src, dst)
     return y + SEQ_MSG_H / 2
 
@@ -581,34 +613,37 @@ def _place_frame(block, cursor, ctx):
     inset = SEQ_FRAME_OVERHANG - SEQ_FRAME_INSET * min(ctx.depth, 2)
     lo = max(0, min(frame["lo"], len(ctx.order) - 1))
     hi = max(frame["hi"], lo)
-    x0 = ctx.order[lo].cx - inset
+    tab_w = max(SEQ_TAB_MIN_W,
+                text_size(block.kind, SEQ_FONT)[0] + SEQ_TAB_PAD_X)
+    # the tab hangs off the left edge, so keep it clear of the lifeline there
+    x0 = ctx.order[lo].cx - max(inset, tab_w + SEQ_TAB_CLEAR)
     x1 = ctx.order[hi].cx + inset
     width = x1 - x0
-    ctx.frames.append(_line(x0, top, [[0.0, 0.0], [width, 0.0]],
-                            SEQ_FRAME_STROKE, "dotted", 2))
-    ctx.frames.append(_line(x0, bottom, [[0.0, 0.0], [width, 0.0]],
-                            SEQ_FRAME_STROKE, "dotted", 2))
-    ctx.frames.append(_line(x0, top, [[0.0, 0.0], [0.0, bottom - top]],
-                            SEQ_FRAME_STROKE, "dotted", 2))
-    ctx.frames.append(_line(x1, top, [[0.0, 0.0], [0.0, bottom - top]],
-                            SEQ_FRAME_STROKE, "dotted", 2))
+    ctx.frames.append(_base(
+        new_id(), "rectangle", x0, top, width, bottom - top, [],
+        strokeColor=SEQ_FRAME_STROKE, backgroundColor="transparent",
+        strokeWidth=2, strokeStyle="dashed", roughness=1,
+        roundness={"type": 3}))
 
     for index, (description, _) in enumerate(block.branches):
         branch_top = branch_tops[index]
         if index:
             ctx.frames.append(_line(x0, branch_top, [[0.0, 0.0], [width, 0.0]],
-                                    SEQ_FRAME_STROKE, "dotted", 2))
+                                    SEQ_FRAME_STROKE, "dashed", 2))
         if not description:
             continue
         caption = f"[{description}]"
         caption_w = text_size(caption, SEQ_TITLE_FONT)[0]
+        ctx.obstacles.append(((x0 + x1) / 2 - caption_w / 2 - SEQ_MASK_PAD,
+                              (x0 + x1) / 2 + caption_w / 2 + SEQ_MASK_PAD,
+                              branch_top + SEQ_FRAME_TITLE_DY,
+                              branch_top + SEQ_FRAME_TITLE_DY
+                              + SEQ_TITLE_FONT * SEQ_LINE_H))
         ctx.frames.append(_text(
             caption, (x0 + x1) / 2 - caption_w / 2,
             branch_top + SEQ_FRAME_TITLE_DY, caption_w, SEQ_TITLE_FONT,
             align="left", valign="top"))
 
-    tab_w = max(SEQ_TAB_MIN_W,
-                text_size(block.kind, SEQ_FONT)[0] + SEQ_TAB_PAD_X)
     tab = _base(new_id(), "rectangle", x0, top - SEQ_TAB_UP, tab_w, SEQ_TAB_H,
                 [], strokeColor=SEQ_FRAME_STROKE, backgroundColor=SEQ_TAB_FILL,
                 strokeWidth=2, roughness=1, roundness={"type": 3})
@@ -628,27 +663,24 @@ def convert_sequence(mermaid_text):
     cursor = _walk(root, SEQ_HEADER_H, ctx)
     footer_top = cursor + SEQ_FOOTER_GAP
 
-    headers, footers, actors, lifelines = [], [], [], []
+    headers, actors, lifelines = [], [], []
     for part in order:
         if part.is_actor:
             actors.extend(_actor(part, band_top, part.anchor_id))
-            actors.extend(_actor(part, footer_top, new_id()))
             top = band_top + SEQ_ACTOR_LIFELINE_DY
-            bottom = footer_top - SEQ_ACTOR_FOOTER_LIFT
+            bottom = footer_top
         else:
             headers.extend(_header(part, band_top, part.anchor_id))
-            footers.extend(_header(part, footer_top, new_id()))
             top = band_top + SEQ_HEADER_H
             bottom = footer_top
-        lifelines.append(_line(part.cx, top, [[0.0, 0.0], [0.0, bottom - top]],
-                               SEQ_LIFELINE))
+        lifelines.extend(_lifeline(part.cx, top, bottom, ctx.obstacles))
         if part.bound:
             headers_by_id = {e["id"]: e for e in headers + actors}
             anchor = headers_by_id[part.anchor_id]
             anchor["boundElements"] = (anchor.get("boundElements") or []) + [
                 {"type": "arrow", "id": aid} for aid in part.bound]
 
-    # bottom-to-top: block backgrounds, the mirrored footer row, notes,
+    # bottom-to-top: block backgrounds, notes,
     # lifelines, messages, frames, actor figures, top headers, tabs
-    return (ctx.backgrounds + footers + ctx.notes + lifelines + ctx.messages
+    return (ctx.backgrounds + lifelines + ctx.notes + ctx.messages
             + ctx.frames + actors + headers + ctx.tabs)

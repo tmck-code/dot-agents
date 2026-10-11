@@ -28,6 +28,7 @@ The diagram type is taken from the first directive line in the input.
 Usage: convert.py <input.mmd> <output.excalidraw>
 """
 import json
+import math
 import re
 import sys
 import uuid
@@ -46,15 +47,16 @@ PAD_X = 50.0
 COL_GAP = 120.0
 ROW_GAP = 40.0
 
-PALETTE = [
-    "#e7f5ff",  # blue
-    "#e6fcf5",  # teal
-    "#ebfbee",  # green
-    "#f3f8e7",  # lime
-    "#f5f1ff",  # purple
-    "#fff0f4",  # pink
-    "#fff5f5",  # red-tint
+PALETTE = [  # (fill, stroke) pairs
+    ("#e7f5ff", "#1971c2"),  # blue
+    ("#e6fcf5", "#0ca678"),  # teal
+    ("#ebfbee", "#2f9e44"),  # green
+    ("#f4fce3", "#66a80f"),  # lime
+    ("#f3f0ff", "#7048e8"),  # purple
+    ("#fff0f6", "#c2255c"),  # pink
+    ("#fff5f5", "#e03131"),  # red-tint
 ]
+LINE_COLOR = "#868e96"
 
 # --- ERD table styling -------------------------------------------------
 # Geometry reverse-engineered from the tables in a hand-drawn ERD
@@ -62,7 +64,8 @@ PALETTE = [
 # every ratio below is that file's geometry divided through by its row
 # font size, then re-multiplied by ERD_ROW_FONT.
 ERD_ROW_FONT = 20.0
-ERD_FONT_FAMILY = 3  # code / monospace
+ERD_FONT_FAMILY = 8  # body text
+ERD_TITLE_FONT_FAMILY = 5  # entity titles
 ERD_TITLE_FONT = ERD_ROW_FONT * 1.385
 ERD_ROW_H = ERD_ROW_FONT * 2.307
 ERD_HEADER_H = ERD_ROW_FONT * 3.075
@@ -70,10 +73,14 @@ ERD_TITLE_OFFSET_Y = ERD_ROW_FONT * 0.847
 ERD_PAD_X = ERD_ROW_FONT * 0.77
 ERD_CHAR_W = ERD_ROW_FONT * 0.6  # excalidraw's mono face
 ERD_MIN_WIDTH = 260.0
-ERD_COL_GAP = 160.0
+ERD_COL_GAP = 240.0
+ERD_LABEL_FONT = 12
+ERD_LABEL_COLOR = "#868e96"
+ERD_LABEL_PAD = 6  # added to the estimated label width
+ERD_LABEL_MARGIN = 90.0  # visible line length each side of a label
 ERD_ROW_GAP = 60.0
-ERD_DIVIDER_COLOR = "#ced4da"
-ERD_BORDER_COLOR = "#1e1e1e"
+ERD_DIVIDER_COLOR = "#868e96"
+ERD_BORDER_COLOR = "#868e96"  # arrows and markers
 ERD_TITLE_COLOR = "#ffffff"
 ERD_TEXT_COLOR = "#1e1e1e"
 ERD_KEY_COLORS = {"PK": "#e67700", "UK": "#2f9e44", "FK": "#c92a2a"}
@@ -236,7 +243,7 @@ def layout(nodes, outgoing):
         x += col_widths[c] + COL_GAP
 
 
-def make_frame_less_box(node, color):
+def make_frame_less_box(node, color, stroke):
     """Return (rectangle, title_text, [line, member_text]) excalidraw elements for a node."""
     group_id = new_id() if node.members else None
     group_ids = [group_id] if group_id else []
@@ -246,7 +253,7 @@ def make_frame_less_box(node, color):
     rect = {
         "id": rect_id, "type": "rectangle",
         "x": node.x, "y": node.y, "width": node.width, "height": node.height,
-        "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": color,
+        "angle": 0, "strokeColor": stroke, "backgroundColor": color,
         "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
         "roughness": 0, "opacity": 100, "groupIds": group_ids, "frameId": None,
         "roundness": None, "seed": 1, "version": 1, "versionNonce": 1,
@@ -275,7 +282,7 @@ def make_frame_less_box(node, color):
             "id": new_id(), "type": "line",
             "x": node.x, "y": node.y + DIVIDER_OFFSET_Y,
             "width": node.width, "height": 1.0,
-            "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": color,
+            "angle": 0, "strokeColor": LINE_COLOR, "backgroundColor": color,
             "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
             "roughness": 0, "opacity": 100, "groupIds": group_ids, "frameId": None,
             "roundness": None, "seed": 1, "version": 1, "versionNonce": 1,
@@ -328,7 +335,7 @@ def make_arrow(owner_node, other_node):
         "id": arrow_id, "type": "arrow",
         "x": start_x, "y": start_y,
         "width": abs(dx_end), "height": abs(end_y - start_y),
-        "angle": 0, "strokeColor": "#1e1e1e", "backgroundColor": "transparent",
+        "angle": 0, "strokeColor": LINE_COLOR, "backgroundColor": "transparent",
         "fillStyle": "solid", "strokeWidth": 2, "strokeStyle": "solid",
         "roughness": 0, "opacity": 100, "groupIds": [], "frameId": None,
         "roundness": None, "seed": 1, "version": 1, "versionNonce": 1,
@@ -452,13 +459,23 @@ def size_entity(entity):
     entity.height = ERD_HEADER_H + ERD_ROW_H * len(entity.rows)
 
 
-def er_layout(entities):
+def erd_label_width(label):
+    return math.ceil(len(label) * ERD_LABEL_FONT * 0.6) + ERD_LABEL_PAD
+
+
+def er_layout(entities, rels=()):
     for entity in entities.values():
         size_entity(entity)
     max_col = max((e.col for e in entities.values()), default=0)
     columns = {c: [] for c in range(max_col + 1)}
     for entity in entities.values():
         columns[entity.col].append(entity)
+    gaps = {c: ERD_COL_GAP for c in range(max_col + 1)}
+    for left, right, _lc, _rc, _dot, label in rels:
+        a, b = entities[left], entities[right]
+        lo = min(a.col, b.col)
+        need = erd_label_width(label) + 2 * ERD_LABEL_MARGIN if label else 0
+        gaps[lo] = max(gaps[lo], need)
     x = 0.0
     for c in range(max_col + 1):
         col_entities = columns[c]
@@ -469,7 +486,7 @@ def er_layout(entities):
             e.x = x
             e.y = y
             y += e.height + ERD_ROW_GAP
-        x += max((e.width for e in col_entities), default=ERD_MIN_WIDTH) + ERD_COL_GAP
+        x += max((e.width for e in col_entities), default=ERD_MIN_WIDTH) + gaps[c]
 
 
 def _base(el_id, el_type, x, y, width, height, group_ids, **extra):
@@ -488,11 +505,12 @@ def _base(el_id, el_type, x, y, width, height, group_ids, **extra):
     return el
 
 
-def _erd_text(text, x, y, width, color, font_size, align, group_ids):
+def _erd_text(text, x, y, width, color, font_size, align, group_ids,
+              family=ERD_FONT_FAMILY):
     return _base(
         new_id(), "text", x, y, width, font_size * 1.25, group_ids,
         strokeColor=color, text=text, originalText=text,
-        fontSize=font_size, fontFamily=ERD_FONT_FAMILY,
+        fontSize=font_size, fontFamily=family,
         textAlign=align, verticalAlign="top", containerId=None,
         autoResize=False, lineHeight=1.25,
     )
@@ -514,11 +532,12 @@ def make_erd_table(entity, accent, tint):
     entity.rect_id = rect_id
     els.append(_base(rect_id, "rectangle", entity.x, entity.y,
                      entity.width, entity.height, group_ids,
-                     strokeColor=ERD_BORDER_COLOR, strokeWidth=2))
+                     strokeColor=accent, strokeWidth=2))
 
     els.append(_erd_text(entity.label, entity.x,
                          entity.y + ERD_TITLE_OFFSET_Y, entity.width,
-                         ERD_TITLE_COLOR, ERD_TITLE_FONT, "center", group_ids))
+                         ERD_TITLE_COLOR, ERD_TITLE_FONT, "center", group_ids,
+                         family=ERD_TITLE_FONT_FAMILY))
 
     text_w = entity.width - 2 * ERD_PAD_X
     row_text_dy = (ERD_ROW_H - ERD_ROW_FONT * 1.25) / 2.0
@@ -570,9 +589,12 @@ def make_er_arrow(left, right, lcard, rcard, dotted, label):
     )
     els = [arrow]
     if label:
-        text = _erd_text(label, mid_x, (start_y + end_y) / 2.0,
-                         len(label) * ERD_CHAR_W, ERD_TEXT_COLOR,
-                         ERD_ROW_FONT * 0.7, "center", [])
+        label_w = erd_label_width(label)
+        label_h = math.ceil(ERD_LABEL_FONT * 1.25)
+        text = _erd_text(label, mid_x - label_w / 2.0,
+                         (start_y + end_y) / 2.0 - label_h / 2.0,
+                         label_w, ERD_LABEL_COLOR, ERD_LABEL_FONT, "center", [])
+        text["height"] = label_h
         text["containerId"] = arrow["id"]
         text["verticalAlign"] = "middle"
         arrow["boundElements"] = [{"id": text["id"], "type": "text"}]
@@ -583,7 +605,7 @@ def make_er_arrow(left, right, lcard, rcard, dotted, label):
 def convert_er(mermaid_text):
     entities, rels = parse_er(mermaid_text)
     compute_columns(entities, [(l, r, None, None) for l, r, *_ in rels])
-    er_layout(entities)
+    er_layout(entities, rels)
 
     elements = []
     for idx, entity in enumerate(entities.values()):
@@ -636,8 +658,8 @@ def convert(mermaid_text):
 
     elements = []
     for idx, node in enumerate(nodes.values()):
-        color = PALETTE[idx % len(PALETTE)]
-        rect, title, extras = make_frame_less_box(node, color)
+        color, stroke = PALETTE[idx % len(PALETTE)]
+        rect, title, extras = make_frame_less_box(node, color, stroke)
         elements.append(rect)
         elements.append(title)
         elements.extend(extras)

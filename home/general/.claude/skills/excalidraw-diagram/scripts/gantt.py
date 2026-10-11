@@ -19,7 +19,7 @@ GANTT_UNIT_W = 95.0            # px per axis unit (one grid column)
 GANTT_BAR_H = 31.0
 GANTT_ROW_STRIDE = 31.0        # reference rows touch, no gap
 GANTT_BAND_PAD_Y = 22.0
-GANTT_LABEL_COL_W = 123.0      # section-label column left of the axis origin
+GANTT_LABEL_COL_W = 150.0      # section-label column left of the axis origin
 GANTT_LABEL_PAD_X = 18.0
 GANTT_BAR_FONT = 18.18
 GANTT_SIDE_FONT = 13.85        # label placed beside a too-narrow bar
@@ -32,16 +32,17 @@ GANTT_TICK_GAP_Y = 2.0
 GANTT_TITLE_GAP_Y = 25.0
 GANTT_TITLE_PAD_X = 40.0
 GANTT_TITLE_H = 52.0
-GANTT_BORDER = "#1e1e1e"
-GANTT_TEXT = "#1e1e1e"
-# (bar fill, band tint) pairs, cycled per section; first two from the reference
+GANTT_FREE_TEXT = "#868e96"   # dual-mode: text outside fills
+GANTT_FILL_TEXT = "#1e1e1e"   # text inside fills
+GANTT_GRID = "#868e96"
+# (bar fill, bar stroke, band tint) triples, cycled per section; first two from the reference
 GANTT_PALETTE = [
-    ("#b2f2bb", "#ebfbee"),
-    ("#a5d8ff", "#e7f5ff"),
-    ("#ffec99", "#fff9db"),
-    ("#ffc9c9", "#fff5f5"),
-    ("#d0bfff", "#f3f0ff"),
-    ("#ffd8a8", "#fff4e6"),
+    ("#d3f9d8", "#2f9e44", "#ebfbee"),
+    ("#d0ebff", "#1971c2", "#e7f5ff"),
+    ("#ffec99", "#f08c00", "#fff9db"),
+    ("#ffe3e3", "#e03131", "#fff5f5"),
+    ("#eebefa", "#9c36b5", "#f8f0fc"),
+    ("#dbe4ff", "#4263eb", "#edf2ff"),
 ]
 
 TASK_RE = re.compile(r'^(.*?)\s*:\s*(.+)$')
@@ -135,11 +136,11 @@ def _wrap(text, max_chars):
 
 
 def _text(text, x, y, width, font_size, align, group_ids, family=GANTT_FONT_FAMILY,
-          background="transparent"):
+          background="transparent", color=GANTT_FREE_TEXT):
     lines = text.count("\n") + 1
     return _base(
         new_id(), "text", x, y, width, font_size * 1.25 * lines, group_ids,
-        strokeColor=GANTT_TEXT, backgroundColor=background,
+        strokeColor=color, backgroundColor=background,
         text=text, originalText=text, fontSize=font_size, fontFamily=family,
         textAlign=align, verticalAlign="top", containerId=None,
         autoResize=False, lineHeight=1.25,
@@ -162,30 +163,32 @@ def convert_gantt(mermaid_text):
     bands, bars, side_labels, section_labels = [], [], [], []
     y = y0
     for idx, (name, ts) in enumerate(sections):
-        bar_fill, tint = GANTT_PALETTE[idx % len(GANTT_PALETTE)]
+        bar_fill, bar_stroke, tint = GANTT_PALETTE[idx % len(GANTT_PALETTE)]
         band_h = 2 * GANTT_BAND_PAD_Y + max(len(ts), 1) * GANTT_ROW_STRIDE
         bands.append(_base(new_id(), "rectangle", band_x, y, band_w, band_h, [],
-                           backgroundColor=tint))
+                           strokeColor=GANTT_GRID, backgroundColor=tint))
         if name:
-            label = _wrap(name, 8)
+            label = _wrap(name, 10)
             n_lines = label.count("\n") + 1
             lh = GANTT_SECTION_FONT * 1.25 * n_lines
             section_labels.append(_text(
                 label, band_x + GANTT_LABEL_PAD_X, y + (band_h - lh) / 2,
                 GANTT_LABEL_COL_W - 2 * GANTT_LABEL_PAD_X, GANTT_SECTION_FONT,
-                "center", []))
+                "center", [], family=GANTT_TITLE_FONT_FAMILY,
+                color=GANTT_FILL_TEXT))
         ry = y + GANTT_BAND_PAD_Y
         for task, start, end in ts:
             gid = [new_id()]
             bx, bw = tx(start), max(end - start, 0.05) * GANTT_UNIT_W
             bars.append(_base(new_id(), "rectangle", bx, ry, bw, GANTT_BAR_H, gid,
-                              backgroundColor=bar_fill, strokeWidth=2,
+                              strokeColor=bar_stroke, backgroundColor=bar_fill,
+                              strokeWidth=2,
                               roundness={"type": 3}))
             text_w = len(task) * GANTT_BAR_FONT * GANTT_CHAR_W
             if text_w + 16 <= bw:
                 bars.append(_text(task, bx + (bw - text_w) / 2, ry + 4, text_w,
                                   GANTT_BAR_FONT, "center", gid,
-                                  background=bar_fill))
+                                  background=bar_fill, color=GANTT_FILL_TEXT))
             else:
                 # left-aligned so the text hugs the bar regardless of how far
                 # the width heuristic overshoots the real glyph widths
@@ -195,7 +198,7 @@ def convert_gantt(mermaid_text):
                                          strokeColor="transparent",
                                          backgroundColor=tint))
                 side_labels.append(_text(task, sx, sy + 1, sw, GANTT_SIDE_FONT,
-                                         "left", gid))
+                                         "left", gid, color=GANTT_FILL_TEXT))
             ry += GANTT_ROW_STRIDE
         y += band_h
     y_end = y
@@ -204,7 +207,7 @@ def convert_gantt(mermaid_text):
     for i in range(n_units + 1):
         gx = x0 + i * GANTT_UNIT_W
         grid.append(_base(new_id(), "line", gx, y0, 0, y_end - y0, [],
-                          backgroundColor="#ffffff",
+                          strokeColor=GANTT_GRID,
                           points=[[0, 0], [0, y_end - y0]],
                           startBinding=None, endBinding=None,
                           startArrowhead=None, endArrowhead=None,
@@ -226,7 +229,7 @@ def convert_gantt(mermaid_text):
                                roughness=2, roundness={"type": 3}))
         title_els.append(_text(title, px + GANTT_TITLE_PAD_X, py + 10, tw,
                                GANTT_TITLE_FONT, "center", [],
-                               family=GANTT_TITLE_FONT_FAMILY))
+                               family=GANTT_TITLE_FONT_FAMILY, color=GANTT_FILL_TEXT))
 
     # draw order: bands, grid, bars (+ inside labels), side labels, ticks, sections, title
     return bands + grid + bars + side_labels + ticks + section_labels + title_els

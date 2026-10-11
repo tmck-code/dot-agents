@@ -29,18 +29,15 @@ PIE_LEGEND_PAD_X = 12.0      # swatch -> its label
 PIE_LEGEND_STRIDE = 30.0
 PIE_TITLE_FONT = 25.82
 PIE_TITLE_GAP_Y = 28.0
-PIE_BORDER = "#000000"       # as in the reference
-PIE_TEXT = "#1e1e1e"
-PIE_PALETTE = [
-    "#a5d8ff",
-    "#b2f2bb",
-    "#ffec99",
-    "#ffc9c9",
-    "#d0bfff",
-    "#ffd8a8",
-    "#99e9f2",
-    "#eebefa",
-    "#ced4da",
+PIE_FREE_TEXT = "#868e96"   # dual-mode: text outside fills
+PIE_FILL_TEXT = "#1e1e1e"   # text inside fills
+PIE_PALETTE = [  # (fill, stroke); same series order as xychart.py
+    ("#d0ebff", "#1971c2"),
+    ("#d3f9d8", "#2f9e44"),
+    ("#ffec99", "#f08c00"),
+    ("#ffe3e3", "#e03131"),
+    ("#eebefa", "#9c36b5"),
+    ("#f1f3f5", "#868e96"),
 ]
 
 SLICE_RE = re.compile(r'^"([^"]*)"\s*:\s*(-?\d+(?:\.\d+)?)$')
@@ -75,11 +72,11 @@ def parse_pie(text):
 
 
 def _text(text, x, y, width, font_size, align, group_ids, family=PIE_FONT_FAMILY,
-          background="transparent"):
+          background="transparent", color=PIE_FREE_TEXT):
     lines = text.count("\n") + 1
     return _base(
         new_id(), "text", x, y, width, font_size * 1.25 * lines, group_ids,
-        strokeColor=PIE_TEXT, backgroundColor=background,
+        strokeColor=color, backgroundColor=background,
         text=text, originalText=text, fontSize=font_size, fontFamily=family,
         textAlign=align, verticalAlign="top", containerId=None,
         autoResize=False, lineHeight=1.25,
@@ -98,7 +95,7 @@ def _arc(cx, cy, r, a0, a1):
     return [_rim(cx, cy, r, a0 + (a1 - a0) * i / n) for i in range(n + 1)]
 
 
-def _wedge(cx, cy, r, a0, a1, fill, group_ids):
+def _wedge(cx, cy, r, a0, a1, fill, stroke, group_ids):
     pts = [(cx, cy)] + _arc(cx, cy, r, a0, a1) + [(cx, cy)]
     ox, oy = pts[0]
     rel = [[px - ox, py - oy] for px, py in pts]
@@ -106,7 +103,7 @@ def _wedge(cx, cy, r, a0, a1, fill, group_ids):
     ys = [p[1] for p in rel]
     return _base(
         new_id(), "line", ox, oy, max(xs) - min(xs), max(ys) - min(ys), group_ids,
-        strokeColor=PIE_BORDER, backgroundColor=fill, fillStyle="solid",
+        strokeColor=stroke, backgroundColor=fill, fillStyle="solid",
         strokeWidth=1, roughness=1, points=rel, lastCommittedPoint=None,
         startBinding=None, endBinding=None,
         startArrowhead=None, endArrowhead=None, polygon=False,
@@ -122,22 +119,23 @@ def convert_pie(mermaid_text):
     cx = cy = 0.0
     r = PIE_RADIUS
     group_ids = [new_id()]
-    colors = [PIE_PALETTE[i % len(PIE_PALETTE)] for i in range(len(slices))]
+    pairs = [PIE_PALETTE[i % len(PIE_PALETTE)] for i in range(len(slices))]
+    colors = [f for f, _ in pairs]
 
     # the ellipse sits underneath everything, so any seam between wedges shows
     # the last slice's colour rather than white
     circle = [_base(new_id(), "ellipse", cx - r, cy - r, 2 * r, 2 * r, group_ids,
-                    strokeColor=PIE_BORDER, backgroundColor=colors[-1],
+                    strokeColor=pairs[-1][1], backgroundColor=colors[-1],
                     fillStyle="solid", strokeWidth=1, roughness=1)]
 
     wedges, labels = [], []
     angle = 0.0
-    for (label, value), fill in zip(slices, colors):
+    for (label, value), (fill, stroke) in zip(slices, pairs):
         sweep = value / total * 360.0
         a0, a1 = angle, angle + sweep
         angle = a1
         if len(slices) > 1:
-            wedges.append(_wedge(cx, cy, r, a0, a1, fill, group_ids))
+            wedges.append(_wedge(cx, cy, r, a0, a1, fill, stroke, group_ids))
         if sweep < PIE_MIN_LABEL_SWEEP:
             continue  # a label would not fit inside the slice
         pct = f"{value / total * 100:.0f}%"
@@ -155,20 +153,20 @@ def convert_pie(mermaid_text):
             w = len(pct) * font * PIE_CHAR_W
         lx, ly = _rim(cx, cy, label_r, (a0 + a1) / 2)
         labels.append(_text(pct, lx - w / 2, ly - font * 1.25 / 2, w,
-                            font, "center", []))
+                            font, "center", [], color=PIE_FILL_TEXT))
 
     legend = []
     lx = cx + r + PIE_LEGEND_GAP_X
     ly = cy - len(slices) * PIE_LEGEND_STRIDE / 2
     legend_w = 0.0
-    for (label, value), fill in zip(slices, colors):
+    for (label, value), (fill, stroke) in zip(slices, pairs):
         text = f"{label} — {value:,g}" if show_data else label
         w = len(text) * PIE_LEGEND_FONT * PIE_CHAR_W
         legend_w = max(legend_w, PIE_LEGEND_SWATCH + PIE_LEGEND_PAD_X + w)
         sy = ly + (PIE_LEGEND_STRIDE - PIE_LEGEND_SWATCH) / 2
         legend.append(_base(new_id(), "rectangle", lx, sy,
                             PIE_LEGEND_SWATCH, PIE_LEGEND_SWATCH, [],
-                            strokeColor=PIE_BORDER, backgroundColor=fill,
+                            strokeColor=stroke, backgroundColor=fill,
                             fillStyle="solid", strokeWidth=1, roundness=None))
         legend.append(_text(text, lx + PIE_LEGEND_SWATCH + PIE_LEGEND_PAD_X,
                             ly + (PIE_LEGEND_STRIDE - PIE_LEGEND_FONT * 1.25) / 2,
