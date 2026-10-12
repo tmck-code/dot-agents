@@ -58,3 +58,5 @@ GitHub tables break in two ways that both show as literal pipes:
 
 - **No blank line before the table.** A table cannot interrupt a paragraph or a bullet. Put an empty line between a bullet and a table nested under it, and keep the table's indent equal to the bullet's content.
 - **A newline inside a cell.** Lists in a cell are `<ul><li>…</li></ul>` on one line; line breaks are `<br/>`. Backticks still render as code inside them.
+
+Worked example: the hook table nested under the first Summary bullet of PR #3, with a lead phrase, `<br/>`, then a `<ul>` per cell.
