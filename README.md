@@ -31,3 +31,4 @@ pre-commit check that fails if the linux and osx `settings.json` drift apart
 ## Docs
 
   - [Skill nudge system](home/linux/.claude/skill-nudge-system.md)
+  - [Hook canvas](docs/hooks-canvas.png) ([source](docs/hooks-canvas.excalidraw)): the four locally-written hooks, what they do and what they write
