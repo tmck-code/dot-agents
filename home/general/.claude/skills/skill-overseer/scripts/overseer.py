@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 '''skill-overseer: lease disabled skills to live sessions, reap dead ones.
 
-State lives in ~/.claude/skill-overseer/. Skill enable/disable is expressed as
+State lives in $CLAUDE_CONFIG_DIR/skill-overseer/ ($CLAUDE_CONFIG_DIR defaults to
+~/.claude). Skill enable/disable is expressed as
 edits to <project>/.claude/settings.local.json -> skillOverrides.
 
 Liveness is read straight off Claude Code's own transcripts: each session writes
-~/.claude/projects/<encoded-cwd>/<session-id>.jsonl continuously, so its mtime is
+$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/<session-id>.jsonl continuously, so its mtime is
 the session's last-activity time. A session is 'alive' if that mtime is within
 the liveness window (plus the current session, always treated as alive).
 
@@ -28,11 +29,11 @@ import json
 import os
 import sys
 
-HOME = os.path.expanduser('~')
-STATE_DIR = os.path.join(HOME, '.claude', 'skill-overseer')
+CONFIG_DIR = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(os.path.expanduser('~'), '.claude')
+STATE_DIR = os.path.join(CONFIG_DIR, 'skill-overseer')
 CONFIG_PATH = os.path.join(STATE_DIR, 'config.json')
 STATE_PATH = os.path.join(STATE_DIR, 'state.json')
-PROJECTS_DIR = os.path.join(HOME, '.claude', 'projects')
+PROJECTS_DIR = os.path.join(CONFIG_DIR, 'projects')
 
 # Skills that must never be auto-disabled, regardless of leases.
 DEFAULT_KEEP_ON = [
@@ -45,7 +46,7 @@ DEFAULT_KEEP_ON = [
 DEFAULT_CONFIG = {
     'liveness_minutes': 30,
     # On-disk skill roots the overseer scans for descriptions (search) and tidy.
-    'skill_roots': ['~/.claude/skills', '~/.agents/skills', '.claude/skills'],
+    'skill_roots': [os.path.join(CONFIG_DIR, 'skills'), '~/.agents/skills', '.claude/skills'],
     'keep_on': DEFAULT_KEEP_ON,
     # Default-off, enable-on-demand skills the overseer searches and manages.
     'pool': [],

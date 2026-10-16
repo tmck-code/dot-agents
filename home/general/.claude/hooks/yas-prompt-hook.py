@@ -3,8 +3,8 @@
 
 Claude Code invokes this script on every UserPromptSubmit event, passing a
 JSON payload on stdin.  The script reads session_id from the payload, then
-atomically updates ~/.claude/yas-last-prompt.json (or
-$CLAUDE_CONFIG_DIR/yas-last-prompt.json) with the current epoch timestamp for
+atomically updates $CLAUDE_CONFIG_DIR/yas-last-prompt.json (default
+~/.claude/yas-last-prompt.json) with the current epoch timestamp for
 that session.  All other sessions' entries are preserved.
 
 Never raises — any failure is silently swallowed and the process exits 0.
@@ -18,10 +18,7 @@ from pathlib import Path
 
 
 def _state_path() -> Path:
-    config_dir = os.environ.get('CLAUDE_CONFIG_DIR', '')
-    if config_dir:
-        return Path(config_dir) / 'yas-last-prompt.json'
-    return Path.home() / '.claude' / 'yas-last-prompt.json'
+    return Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'yas-last-prompt.json'
 
 
 def main() -> None:

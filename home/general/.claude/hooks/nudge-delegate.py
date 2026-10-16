@@ -6,7 +6,7 @@ a routing table, inject a non-blocking reminder (or, for rules with
 "action": "deny", hard-block the call and return the hint to the model).
 
 This hook is one part of a set of files that keep agent context windows small
-(paths relative to ~/.claude):
+(paths relative to $CLAUDE_CONFIG_DIR, default ~/.claude):
   - Delegation routing (this file + delegate-routing.json): nudge test/lint
     runs and wide searches to subagents, deny whole-file reads >= 100 lines or
     20 KB, cap orchestrator call counts, deny orchestrator code writes.
@@ -34,7 +34,7 @@ This hook is one part of a set of files that keep agent context windows small
 
 Routing table resolution (project overrides user):
   1. $CLAUDE_PROJECT_DIR/.claude/delegate-routing.json   (if present)
-  2. ~/.claude/delegate-routing.json                      (fallback default)
+  2. $CLAUDE_CONFIG_DIR/delegate-routing.json             (fallback default)
 
 Caller identity:
   Claude Code sets agent_id/agent_type in the hook stdin ONLY for
@@ -63,7 +63,7 @@ Table schema:
     summed over the whole command. Unparseable commands are ignored.
   - "action" is "nudge" (default) or "deny" for every rule kind.
   - "callBudget" counts every call the hook sees from the caller (no "tool"
-    filter) in $CLAUDE_CONFIG_DIR|~/.claude/hooks/state/calls-<session>-<agent>.json
+    filter) in $CLAUDE_CONFIG_DIR/hooks/state/calls-<session>-<agent>.json
     and nudges once when the count reaches maxCalls and once at 2x. "{count}" in
     the hint is replaced by the count. It never stops other rules being checked.
   - "agent" is optional - when set, the message names it.
@@ -100,12 +100,16 @@ SED_RANGE_RE = re.compile(r'^(\d+),(\+?)(\d+)p$')
 SED_LINE_RE = re.compile(r'^(\d+)p$')
 
 
+def config_dir() -> Path:
+    return Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+
+
 def load_rules() -> list:
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '')
     candidates = []
     if project_dir:
         candidates.append(Path(project_dir) / '.claude' / 'delegate-routing.json')
-    candidates.append(Path.home() / '.claude' / 'delegate-routing.json')
+    candidates.append(config_dir() / 'delegate-routing.json')
 
     for path in candidates:
         try:
@@ -368,10 +372,9 @@ def bash_read_size(command: str, base_cwd: Path):
 # --- callBudget ----------------------------------------------------------------
 
 def state_path(session_id: str, agent_id: str) -> Path:
-    config = os.environ.get('CLAUDE_CONFIG_DIR') or str(Path.home() / '.claude')
     safe = lambda v: re.sub(r'[^\w.-]', '_', v) or 'x'
     name = f'calls-{safe(session_id or "nosession")}-{safe(agent_id or "main")}.json'
-    return Path(config) / 'hooks' / 'state' / name
+    return config_dir() / 'hooks' / 'state' / name
 
 
 def bump_counter(data: dict) -> int:

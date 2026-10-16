@@ -81,7 +81,7 @@ file (the path the hooks announced) and at the files on disk.
 - The full gate runs **once**, as one combined command (for example
   `make -k lint typecheck test`).
 - Run it through the verification worker, or once yourself with
-  `~/.claude/scripts/gate.sh <log> <cmd>` and `run_in_background`.
+  `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" <log> <cmd>` and `run_in_background`.
 - Never run gates one at a time with a turn end between each.
 - After a fix, rerun only the failed gate, not the full sweep.
 - On a crash (`reason=stall|timeout|crash-in-log`, collected not equal to ran),

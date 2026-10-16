@@ -45,7 +45,7 @@ other agents.
 - Use quiet flags (`-q`) and `2>&1 | tail -20`. Never dump full output.
 - Never run the full suite unless the brief makes you the verifier. As verifier,
   run it once as one combined command, with
-  `~/.claude/scripts/gate.sh <log> <cmd>` and `run_in_background`. Act on the
+  `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" <log> <cmd>` and `run_in_background`. Act on the
   notification. Report failures and crash status verbatim.
 - Never poll. Do not run `sleep` or timer loops. Wait for the notification.
 

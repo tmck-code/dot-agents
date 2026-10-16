@@ -24,37 +24,37 @@ current session's transcript. Each command auto-detects the session and project.
 1. **Reap first** — drop leases from sessions that are no longer running and
    disable anything they left on:
    ```bash
-   python3 ~/.claude/skills/skill-overseer/scripts/overseer.py reap
+   python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/skill-overseer/scripts/overseer.py" reap
    ```
 
 2. **Search** disabled skills for the capability you need:
    ```bash
-   python3 ~/.claude/skills/skill-overseer/scripts/overseer.py search docker fastapi
+   python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/skill-overseer/scripts/overseer.py" search docker fastapi
    ```
    Rows flagged `DISABLED` are candidates.
 
 3. **Enable + lease** the relevant skill(s) to this session:
    ```bash
-   python3 ~/.claude/skills/skill-overseer/scripts/overseer.py enable docker-fastapi
+   python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/skill-overseer/scripts/overseer.py" enable docker-fastapi
    ```
 
 4. **Use it.** A freshly-enabled override may not appear in the `Skill` tool list
    until the harness reloads. If it isn't callable yet, just **read its
    `SKILL.md` off disk and follow it directly** — that always works:
    ```bash
-   cat ~/.claude/skills/docker-fastapi/SKILL.md   # or ~/.agents/skills/...
+   cat "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/docker-fastapi/SKILL.md"   # or ~/.agents/skills/...
    ```
 
 5. **Release** when the task is done (disables it unless another live session
    still leases it):
    ```bash
-   python3 ~/.claude/skills/skill-overseer/scripts/overseer.py release docker-fastapi
+   python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/skill-overseer/scripts/overseer.py" release docker-fastapi
    ```
 
 ## How liveness works
 
 Each Claude Code session continuously writes
-`~/.claude/projects/<encoded-cwd>/<session-id>.jsonl`; its mtime is the session's
+`$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/<session-id>.jsonl`; its mtime is the session's
 last activity. A session is alive if that mtime is within `liveness_minutes`
 (default 30) — plus the current session, always alive. `reap` drops any lease
 whose owning session has gone cold and disables the now-unleased skill. A skill
@@ -62,9 +62,10 @@ with at least one live lease is never disabled.
 
 ## Config
 
-`~/.claude/skill-overseer/config.json` (create with `init` once):
+`$CLAUDE_CONFIG_DIR/skill-overseer/config.json` (`$CLAUDE_CONFIG_DIR` defaults to
+`~/.claude`; create with `init` once):
 ```bash
-python3 ~/.claude/skills/skill-overseer/scripts/overseer.py init
+python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/skill-overseer/scripts/overseer.py" init
 ```
 - `pool` — default-off, on-demand skills the overseer searches and manages.
 - `keep_on` — skills it must **never** auto-disable (this skill, find-skills,
@@ -73,7 +74,7 @@ python3 ~/.claude/skills/skill-overseer/scripts/overseer.py init
 - `tidy_unclaimed` — also disable on-disk skills that are enabled, not in
   `keep_on`, and unleased (catches strays installed by another session).
 
-State (leases per project/session) lives in `~/.claude/skill-overseer/state.json`.
+State (leases per project/session) lives in `$CLAUDE_CONFIG_DIR/skill-overseer/state.json`.
 
 ## Notes
 

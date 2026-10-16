@@ -23,7 +23,7 @@ Route: subagents absorb noise, you absorb verdicts. Delegate gates, multi-file d
 - Git: path-scoped reads (`git diff <ref> -- <paths>`, `git show <ref>:<path>`); undo by rewriting the file. Tree-level git or co-editing one deliverable needs `isolation: "worktree"`.
 
 ## Gates
-Run as `~/.claude/scripts/gate.sh [-t secs] [-s secs] .scratch/<shelf>/gate-<name>.log <cmd>`. Main thread: `run_in_background`; act on the notification. Subagents: foreground (no `run_in_background`), never end a turn with a gate running, and one pytest run at a time across workers (shared test DB).
+Run as `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" [-t secs] [-s secs] .scratch/<shelf>/gate-<name>.log <cmd>`. Main thread: `run_in_background`; act on the notification. Subagents: foreground (no `run_in_background`), never end a turn with a gate running, and one pytest run at a time across workers (shared test DB).
 - Subagent briefs: pass the foreground rule down; a worker that backgrounds a gate ends its turn, its orchestrator stops, and the result is lost.
 - Verdict: `<log>.status`. Other views: `grep` the log.
 - After a fix rerun only that file/`-k`; full suite once more, at the end.

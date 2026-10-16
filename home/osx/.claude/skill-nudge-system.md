@@ -19,13 +19,15 @@ instructs Claude to enable it (via `overseer.py enable`) *before* invoking it.
 
 ## Component inventory
 
+`$CLAUDE_CONFIG_DIR` below is the Claude config dir (defaults to `~/.claude` when unset).
+
 | Path | Role |
 |---|---|
-| `~/.claude/hooks/skill-nudge.py` | The hook. Unions routing tables, matches the prompt, consults effective overrides, emits one `additionalContext` reminder. |
-| `~/.claude/skill-routing.json` | **Global** routing table (generic skills, e.g. `grill-me`). |
+| `$CLAUDE_CONFIG_DIR/hooks/skill-nudge.py` | The hook. Unions routing tables, matches the prompt, consults effective overrides, emits one `additionalContext` reminder. |
+| `$CLAUDE_CONFIG_DIR/skill-routing.json` | **Global** routing table (generic skills, e.g. `grill-me`). |
 | `<repo>/.claude/skill-routing.json` | **Project** routing table (repo-specific skills, e.g. `audiovis-debug-visual`, `audiovis-fractal`). |
-| `~/.claude/settings.json` | Wires `skill-nudge.py` into `UserPromptSubmit`. |
-| `~/.claude/skills/skill-overseer/scripts/overseer.py` | The overseer CLI the nudge points at for disabled skills. |
+| `$CLAUDE_CONFIG_DIR/settings.json` | Wires `skill-nudge.py` into `UserPromptSubmit`. |
+| `$CLAUDE_CONFIG_DIR/skills/skill-overseer/scripts/overseer.py` | The overseer CLI the nudge points at for disabled skills. |
 | `<dir>/.claude/settings.local.json` → `skillOverrides` | Where enable/disable state actually lives (user + project). |
 
 > **Precedent:** this mirrors the existing `nudge-delegate.py` + `delegate-routing.json`
@@ -135,7 +137,7 @@ flowchart LR
 - A rule lacking `skill` or `match`, or whose `match` fails to compile, is skipped.
 - All rules are searched; every match contributes a line to the single reminder.
 
-**Current global table** (`~/.claude/skill-routing.json`):
+**Current global table** (`$CLAUDE_CONFIG_DIR/skill-routing.json`):
 
 | skill | fires on |
 |---|---|
@@ -155,9 +157,13 @@ flowchart LR
 `load_overrides()` builds the **effective** `skillOverrides` map:
 
 ```python
+def config_dir() -> Path:
+    return Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+
+
 def load_overrides() -> dict:
     '''Effective skillOverrides map: user first, project wins per-key.'''
-    paths = [Path.home() / '.claude' / 'settings.local.json']
+    paths = [config_dir() / 'settings.local.json']
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '')
     if project_dir:
         paths.append(Path(project_dir) / '.claude' / 'settings.local.json')
@@ -182,7 +188,7 @@ The message-building loop branches per skill:
 
 ```python
     overrides = load_overrides()
-    overseer = 'python3 "$HOME/.claude/skills/skill-overseer/scripts/overseer.py"'
+    overseer = 'python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/skill-overseer/scripts/overseer.py"'
 
     lines = []
     for skill, hint in hits:
@@ -220,7 +226,7 @@ Prompt `"grill me"` in a project where `skillOverrides: {"grill-me": "off"}`:
 
 ```text
 - `grill-me` (currently DISABLED): user wants to be interrogated/stress-tested on a
-  plan or design — enable it first by running `python3 "$HOME/.claude/skills/
+  plan or design — enable it first by running `python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/
   skill-overseer/scripts/overseer.py" enable grill-me` (or invoking the `skill-overseer`
   skill), THEN invoke `grill-me` via the Skill tool.
 ```
@@ -274,7 +280,7 @@ Conventions applied (from the global working agreement):
 
 ## Extending the system
 
-- **Add a generic skill** → append a rule to `~/.claude/skill-routing.json`. It fires in
+- **Add a generic skill** → append a rule to `$CLAUDE_CONFIG_DIR/skill-routing.json`. It fires in
   every repo. Keep triggers tight to avoid noise (e.g. `grill-me` only on explicit
   "grill me" phrasing, not every "what are some ways…" prompt).
 - **Add a repo skill** → create / edit `<repo>/.claude/skill-routing.json`. Checked into
@@ -295,17 +301,17 @@ Conventions applied (from the global working agreement):
 ```bash
 # both audiovis skills (project table + global)
 echo '{"prompt":"at 1:34 the glow has too much colour, logs in ./logs/"}' \
-  | CLAUDE_PROJECT_DIR=/home/freman/dev/audiovis python3 ~/.claude/hooks/skill-nudge.py
+  | CLAUDE_PROJECT_DIR=/home/freman/dev/audiovis python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/skill-nudge.py"
 
 # global-only generic skill
-echo '{"prompt":"grill me on this plan"}' | python3 ~/.claude/hooks/skill-nudge.py
+echo '{"prompt":"grill me on this plan"}' | python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/skill-nudge.py"
 
 # disabled-skill path (simulate with a temp project dir)
 mkdir -p /tmp/ov-test/.claude
 printf '{"skillOverrides":{"grill-me":"off"}}' > /tmp/ov-test/.claude/settings.local.json
 echo '{"prompt":"grill me"}' \
-  | CLAUDE_PROJECT_DIR=/tmp/ov-test python3 ~/.claude/hooks/skill-nudge.py   # → DISABLED + enable hint
+  | CLAUDE_PROJECT_DIR=/tmp/ov-test python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/skill-nudge.py"   # → DISABLED + enable hint
 
 # no match → silent
-echo '{"prompt":"what is the weather"}' | python3 ~/.claude/hooks/skill-nudge.py
+echo '{"prompt":"what is the weather"}' | python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/skill-nudge.py"
 ```

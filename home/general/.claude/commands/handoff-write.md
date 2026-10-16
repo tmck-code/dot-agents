@@ -2,7 +2,7 @@
 description: Write a session handoff onto this branch's scratch shelf for the next session.
 argument-hint: What the next session will focus on
 disable-model-invocation: true
-allowed-tools: Bash(~/.claude/skills/dewey-decimal/shelf.sh:*)
+allowed-tools: Bash("${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/dewey-decimal/shelf.sh":*)
 ---
 
 Write a session handoff so a later session can continue this task.
@@ -11,10 +11,10 @@ Write a session handoff so a later session can continue this task.
 
 `shelf.sh handoff` already ran. It added the ledger row. Its output:
 
-!`~/.claude/skills/dewey-decimal/shelf.sh handoff 2>&1 || echo "exit=$?"`
+!`"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/dewey-decimal/shelf.sh" handoff 2>&1 || echo "exit=$?"`
 
 - A path: write the handoff document to that exact path.
-- `exit=3`: the branch is a trunk or HEAD is detached. Ask the user whether to shelve there. If yes, run `~/.claude/skills/dewey-decimal/shelf.sh -y handoff` and use the path it prints.
+- `exit=3`: the branch is a trunk or HEAD is detached. Ask the user whether to shelve there. If yes, run `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/dewey-decimal/shelf.sh" -y handoff` and use the path it prints.
 - `exit=2`: not a git repo. Ask the user where to write the handoff.
 
 ## Content

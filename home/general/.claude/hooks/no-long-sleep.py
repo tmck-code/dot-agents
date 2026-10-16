@@ -32,7 +32,7 @@ def main() -> int:
         return 0
     print(
         f'BLOCKED: foreground `sleep {secs:g}s` (limit {LIMIT_SECS}s). '
-        'To wait for a gate, run it with `~/.claude/scripts/gate.sh` and run_in_background, '
+        'To wait for a gate, run it with `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh"` and run_in_background, '
         'then end your turn: the completion notification re-invokes you. '
         'To wait on a file or condition, use the Monitor tool with an until-loop.',
         file=sys.stderr,
