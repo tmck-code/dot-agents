@@ -45,7 +45,10 @@ A hook denies every other Write path for this agent type. You have no Edit tool.
 
 ## Briefs
 
-A brief is a map, not a copy. Keep each one under about 2k tokens. Every brief
+A brief is a map, not a copy. Keep each one under about 2k tokens. A brief carries a
+rule card of at most about 40 lines; longer rule sets live in one file on disk
+that the brief names by path, and the worker reads the sections the brief points
+at. Every brief
 carries:
 
 - the exact piece of work and the files it owns;
@@ -68,6 +71,9 @@ carries:
   then verify once. Use quiet flags and `2>&1 | tail -20`. Never run the full
   suite unless this brief makes you the verifier.
 - Never poll (see below).
+- Host tooling: no `python3`, `node`, `cargo`, `npm` on the host. Read JSON with
+  `jq`, edit with the Edit tool, run language tooling through the repo's
+  make/docker front door.
 - Your final message is your report. Write no report file.
 
 ## Follow-ups
@@ -81,7 +87,10 @@ file (the path the hooks announced) and at the files on disk.
 - The full gate runs **once**, as one combined command (for example
   `make -k lint typecheck test`).
 - Run it through the verification worker, or once yourself with
-  `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" <log> <cmd>` and `run_in_background`.
+  `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" <log> <cmd>` in the foreground: no
+  `run_in_background`, Bash `timeout` set to `600000`.
+- Every worker brief that runs a gate repeats that rule: foreground, `timeout`
+  `600000`, no `until [ -f <log>.status ]` loops.
 - Never run gates one at a time with a turn end between each.
 - After a fix, rerun only the failed gate, not the full sweep.
 - On a crash (`reason=stall|timeout|crash-in-log`, collected not equal to ran),

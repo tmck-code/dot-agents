@@ -18,8 +18,10 @@ other agents.
 - Use your own scratch subdir for temporary files: `.scratch/<shelf>/<your-agent-name>/`.
 - Git: path-scoped reads only (`git diff <ref> -- <paths>`, `git show <ref>:<path>`).
   Undo by rewriting the file. No tree-level git commands.
-- Follow the repo `CLAUDE.md` and `CODING_STANDARDS.md`. For Python, use the
-  `python-style` and `pytest-style` skills.
+- Follow the repo `CLAUDE.md` and `CODING_STANDARDS.md`. Use the language skills the repo CLAUDE.md names.
+- Host tooling: no `python3`, `node`, `cargo`, `npm` on the host. Read JSON with
+  `jq`, edit with the Edit tool, run language tooling through the repo's
+  make/docker front door.
 
 ## Read discipline
 
@@ -44,10 +46,14 @@ other agents.
   one-line fix.
 - Use quiet flags (`-q`) and `2>&1 | tail -20`. Never dump full output.
 - Never run the full suite unless the brief makes you the verifier. As verifier,
-  run it once as one combined command, with
-  `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" <log> <cmd>` and `run_in_background`. Act on the
-  notification. Report failures and crash status verbatim.
-- Never poll. Do not run `sleep` or timer loops. Wait for the notification.
+  run it once as one combined command. Report failures and crash status verbatim.
+- Run every gate as `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" <log> <cmd>` in the **foreground**:
+  no `run_in_background`, and set the Bash `timeout` to `600000`. The gate may
+  queue behind another gate's lock first; a shorter timeout moves it to the
+  background and the result is lost.
+- If a gate is moved to the background anyway, end your turn and act on the
+  completion notification.
+- Never poll. No `sleep`, no `until [ -f <log>.status ]` loops, no timer loops.
 
 ## Context budget
 
