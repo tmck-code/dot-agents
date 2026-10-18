@@ -18,4 +18,6 @@ Handle a non-zero `exit=` as step 1 says, then run `shelf.sh start` again. Conti
 
 !`cat "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/dewey-decimal/HANDOFFS.md"`
 
-Done when the newest pending handoff is read, marked read with `shelf.sh read`, and you have told the user what it asks you to do next. If there is no `pending:` line, say so and stop.
+If the handoff has a `Worktree:` field, follow "Worktree handoffs" above before any other work.
+
+Done when the newest pending handoff is read, marked read with `shelf.sh read`, any named worktree is entered (or the user is told it could not be), and you have told the user what it asks you to do next. If there is no `pending:` line, say so and stop.
