@@ -12,7 +12,7 @@ Each branch has one **shelf**: `<repo-root>/.scratch/<branch>/`. `shelf.sh` (in 
 1. **Session start:** run `shelf.sh start`. Act on the exit code:
    - `3`: the branch is a trunk (`master`, `main`, `develop`) or HEAD is detached. Ask the user whether to shelve there. If yes, rerun with `-y start`.
    - `2`: this is not a git repo. Ask the user for a shelf name. Do not write flat into `.scratch/`.
-2. **Pending handoffs:** each `pending:` line is an unread session handoff. Follow [HANDOFFS.md](HANDOFFS.md) before starting other work.
+2. **Pending handoffs:** each `pending:` line is an unread session handoff. Follow [HANDOFFS.md](HANDOFFS.md) before starting other work. A `worktree=<path>` on the line means enter that worktree first.
 3. **Before every scratch write:** run `shelf.sh` and write under the printed `shelf:` path. A `changed:` line means the branch changed; tell the user the old and new shelf.
 
 ## Shelf rules
