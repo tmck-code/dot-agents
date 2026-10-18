@@ -5,6 +5,7 @@
 #   shelf.sh [-y] [start]    resolve the shelf; print its path
 #   shelf.sh handoff         print a new handoff document path; add its ledger row
 #   shelf.sh read HANDOFF    mark a ledger row read (HANDOFF = path relative to shelf)
+#   shelf.sh drop HANDOFF    delete an unread ledger row (its document moved to another shelf)
 #
 # Shelf: <toplevel>/.scratch/<branch>/, the branch name sanitised to one path
 # segment (case kept). Detached HEAD -> detached-<short-sha>.
@@ -16,7 +17,7 @@
 #
 # stdout lines:  shelf: <abs path>
 #                changed: <old> -> <new>
-#                pending: <handoff> written_by=<id> written_at=<ts> [MISSING]
+#                pending: <handoff> written_by=<id> written_at=<ts> [worktree=<path>] [MISSING]
 #
 # Exit: 0 ok | 2 not a git repo | 3 trunk or detached: confirm, then rerun with -y
 
@@ -78,6 +79,15 @@ case $CMD in
       { print }' "$ledger" >"$ledger.tmp" && mv "$ledger.tmp" "$ledger"
     exit 0
     ;;
+  drop)
+    rel=${2:?usage: shelf.sh drop HANDOFF}
+    [[ -f $ledger ]] || { echo "no ledger at $ledger" >&2; exit 1; }
+    # Delete only the matching row, and only if still unread.
+    awk -v rel="$rel" -F' *\\| *' '
+      $2 == rel && $5 == "-" { next }
+      { print }' "$ledger" >"$ledger.tmp" && mv "$ledger.tmp" "$ledger"
+    exit 0
+    ;;
 esac
 
 echo "shelf: $dir"
@@ -93,7 +103,13 @@ fi
 if [[ $CMD == start && -f $ledger ]]; then
   awk -F' *\\| *' 'NR > 2 && $5 == "-" { print $2, $3, $4 }' "$ledger" |
     while read -r rel by at; do
-      miss=; [[ -f $dir/$rel ]] || miss=' MISSING'
-      echo "pending: $rel written_by=$by written_at=$at$miss"
+      miss=; wt=
+      if [[ -f $dir/$rel ]]; then
+        wt=$(sed -nE 's/^Worktree: *([^ ]+).*/\1/p;T;q' "$dir/$rel")
+        [[ -n $wt ]] && wt=" worktree=$wt"
+      else
+        miss=' MISSING'
+      fi
+      echo "pending: $rel written_by=$by written_at=$at$wt$miss"
     done
 fi
