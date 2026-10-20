@@ -8,11 +8,11 @@ sequenceDiagram
     participant POST as PostToolUse hook<br/>subagent-report-announce.py
     participant F as Filesystem
 
-    C->>H: Agent / Task spawn with brief
+    C->>+H: Agent / Task spawn with brief
     H->>PRE: PreToolUse fires
     PRE-->>C: additionalContext:<br/>"no report path, findings as final message"
     H->>F: write agent-ID.meta.json sidecar<br/>(agentType, description, toolUseId, spawnDepth)
-    H->>S: launch
+    H->>+S: launch
 
     rect rgb(254, 226, 226)
         note over S,H: the failure mode this design removes
@@ -38,3 +38,5 @@ sequenceDiagram
     POST->>F: drain breadcrumbs, delete each (announce once)
     POST-->>C: additionalContext: report file paths
     C->>F: read the real findings
+    deactivate S
+    deactivate H

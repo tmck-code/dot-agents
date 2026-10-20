@@ -19,6 +19,7 @@ import math
 import re
 
 from convert import _base, new_id  # noqa: E402  (sibling module)
+from shadow import add_shadows  # noqa: E402
 from flowchart import clean_label  # noqa: E402  (`<br/>` -> newline, entities)
 
 # the participant "legend" rows top and bottom keep the reference's Excalifont;
@@ -75,11 +76,14 @@ SEQ_TAB_CLEAR = 8.0           # tab's right edge to the lifeline
 
 SEQ_ARROW_START = 1.5        # a message leaves its source lifeline by this,
 SEQ_ARROW_END = 4.5          # and stops this far short of the target's
-SEQ_SELF_POINTS = [[0.0, 0.0], [60.5, -9.5], [60.5, 30.5], [1.0, 21.0]]
+SEQ_SELF_POINTS = [[0.0, 0.0], [60.5, 0.0], [60.5, 30.0], [1.0, 30.0]]
 SEQ_SELF_LABEL_DX = 76.0
-SEQ_SELF_LABEL_DY = 10.49
+SEQ_SELF_LABEL_DY = 14.0
 SEQ_SELF_MARGIN = 90.0       # gutter a self-message's label needs to its right
 
+SEQ_BAR_W = 10.0             # activation bar width
+SEQ_BAR_DX = 5.0             # x shift per nesting level
+SEQ_BAR_FILL = "#d0ebff"
 SEQ_HEADER_STROKE = "#868e96"
 SEQ_HEADER_FILL = "#f1f3f5"
 SEQ_LIFELINE = "#868e96"
@@ -103,7 +107,7 @@ SEQ_ACTOR_LIFELINE_DY = 98.0
 DIRECTIVE_RE = re.compile(r'^sequenceDiagram\b')
 AUTONUMBER_RE = re.compile(r'^autonumber\b')
 PARTICIPANT_RE = re.compile(r'^(participant|actor)\s+(\S+?)(?:\s+as\s+(.+?))?\s*$')
-ACTIVATION_RE = re.compile(r'^(activate|deactivate)\s+\S+\s*$')
+ACTIVATION_RE = re.compile(r'^(activate|deactivate)\s+(\S+)\s*$')
 NOTE_RE = re.compile(r'^[Nn]ote\s+(over|left of|right of)\s+([^:]+?)\s*:\s*(.*)$')
 RECT_RE = re.compile(r'^rect\s+(.+?)\s*$')
 BLOCK_RE = re.compile(r'^(par|loop|alt|opt)\b\s*(.*?)\s*$')
@@ -202,8 +206,11 @@ def parse_sequence(text):
         if AUTONUMBER_RE.match(line):
             autonumber = True
             continue
-        if ACTIVATION_RE.match(line):
-            continue  # activation bars are parsed and ignored
+        m = ACTIVATION_RE.match(line)
+        if m:
+            sign = 1 if m.group(1) == "activate" else -1
+            events.append(("act", ensure(m.group(2)), sign))
+            continue
         m = PARTICIPANT_RE.match(line)
         if m:
             ensure(m.group(2), m.group(3), m.group(1) == "actor")
@@ -251,11 +258,14 @@ def _parse_message(line, ensure):
     src = line[:m.start()].strip()
     rest = line[m.end():]
     dst, _, label = rest.partition(":")
-    dst = dst.strip().lstrip("+-").strip()   # activation suffixes are ignored
+    dst = dst.strip()
+    mark = dst[:1] if dst[:1] in "+-" else ""   # `->>+B` / `-->>-A` suffix
+    dst = dst.lstrip("+-").strip()
     if not src or not dst:
         return None
     dotted = m.group(0).startswith("--")
-    return ("msg", ensure(src), ensure(dst), dotted, clean_label(label.strip()))
+    return ("msg", ensure(src), ensure(dst), dotted, clean_label(label.strip()),
+            mark)
 
 
 # --- horizontal layout -------------------------------------------------
@@ -264,7 +274,7 @@ def _collect_spans(events, spans, n):
     """Gather (first_gutter, last_gutter+1, minimum_span) width constraints."""
     for event in events:
         if event[0] == "msg":
-            _, src, dst, _, label = event
+            _, src, dst, _, label = event[:5]
             width = label_size(label)[0] if label else 0.0
             if src is dst:
                 if src.index < n - 1:
@@ -442,6 +452,9 @@ class Layout:
         self.messages = []
         self.frames = []
         self.tabs = []
+        self.bars = []        # activation bars
+        self.open_bars = {}   # participant -> [start y, ...] (nesting stack)
+        self.masks = []       # opaque white boxes behind labels, above lifelines
         self.obstacles = []   # (x0, x1, y0, y1) boxes lifelines must not cross
         self.extents = []   # stack of open containers
         self.depth = 0      # block-frame nesting depth
@@ -454,6 +467,35 @@ class Layout:
                 frame["lo"] = min(frame["lo"], part.index)
                 frame["hi"] = max(frame["hi"], part.index)
 
+    def activate(self, part, y):
+        self.open_bars.setdefault(part, []).append(y)
+
+    def deactivate(self, part, y):
+        stack = self.open_bars.get(part)
+        if stack:
+            self._bar(part, stack.pop(), y, len(stack))
+
+    def close_bars(self, y):
+        for part, stack in self.open_bars.items():
+            while stack:
+                self._bar(part, stack.pop(), y, len(stack))
+
+    def _bar(self, part, y0, y1, depth):
+        x = part.cx - SEQ_BAR_W / 2 + depth * SEQ_BAR_DX
+        bar = _base(new_id(), "rectangle", x, y0, SEQ_BAR_W, max(y1 - y0, 10.0),
+                    [], strokeColor=SEQ_HEADER_STROKE,
+                    backgroundColor=SEQ_BAR_FILL, strokeWidth=2, roughness=1,
+                    customData={"shadow": False})
+        self.bars.append(bar)
+
+    def mask(self, x0, x1, y0, y1):
+        pad = SEQ_MASK_PAD
+        box = _base(new_id(), "rectangle", x0 - pad, y0 - 2, x1 - x0 + 2 * pad,
+                    y1 - y0 + 4, [], strokeColor="transparent",
+                    backgroundColor="#ffffff", strokeWidth=0, roughness=0,
+                    fillStyle="solid", customData={"shadow": False})
+        self.masks.append(box)
+
     def number(self, label):
         self.counter += 1
         return f"{self.counter}. {label}" if self.autonumber and label else label
@@ -463,6 +505,15 @@ def _walk(events, cursor, ctx):
     for event in events:
         if event[0] == "msg":
             cursor = _place_message(event, cursor, ctx)
+            if event[5] == "+":
+                ctx.activate(event[2], cursor - SEQ_MSG_H / 2)
+            elif event[5] == "-":
+                ctx.deactivate(event[1], cursor - SEQ_MSG_H / 2)
+        elif event[0] == "act":
+            if event[2] > 0:
+                ctx.activate(event[1], cursor)
+            else:
+                ctx.deactivate(event[1], cursor)
         elif event[0] == "note":
             cursor = _place_note(event, cursor, ctx)
         elif event[0] == "block":
@@ -475,7 +526,7 @@ def _walk(events, cursor, ctx):
 
 
 def _place_message(event, cursor, ctx):
-    _, src, dst, dotted, label = event
+    _, src, dst, dotted, label = event[:5]
     label = ctx.number(label)
     lines = label.count("\n") + 1 if label else 1
     style = "dashed" if dotted else "solid"
@@ -486,7 +537,7 @@ def _place_message(event, cursor, ctx):
         arrow = _base(
             new_id(), "arrow", src.cx + 0.5, y, 60.5, 40.0, [],
             strokeColor=SEQ_TEXT, strokeWidth=2, strokeStyle=style,
-            roughness=1, roundness={"type": 2},
+            roughness=1, roundness=None,
             points=[list(p) for p in SEQ_SELF_POINTS], lastCommittedPoint=None,
             startBinding={"elementId": src.anchor_id},
             endBinding={"elementId": src.anchor_id},
@@ -503,6 +554,8 @@ def _place_message(event, cursor, ctx):
                          y + SEQ_SELF_LABEL_DY + 10 - height / 2, width,
                          SEQ_LABEL_FONT, align="left")
             ctx.messages.append(text)
+            ctx.mask(src.cx + SEQ_SELF_LABEL_DX, src.cx + SEQ_SELF_LABEL_DX + width,
+                     text["y"], text["y"] + height)
         ctx.mark(src.cx, src.cx + SEQ_SELF_LABEL_DX + width, src)
         return top + max(SEQ_SELF_H, SEQ_MSG_H * (lines + 1))
 
@@ -531,6 +584,7 @@ def _place_message(event, cursor, ctx):
         text["height"] = height
         arrow["boundElements"] = [{"type": "text", "id": text["id"]}]
         ctx.messages.append(text)
+        ctx.mask(mid - width / 2, mid + width / 2, y - height / 2, y + height / 2)
         ctx.obstacles.append((mid - width / 2 - SEQ_MASK_PAD,
                               mid + width / 2 + SEQ_MASK_PAD,
                               y - height / 2, y + height / 2))
@@ -639,6 +693,9 @@ def _place_frame(block, cursor, ctx):
                               branch_top + SEQ_FRAME_TITLE_DY,
                               branch_top + SEQ_FRAME_TITLE_DY
                               + SEQ_TITLE_FONT * SEQ_LINE_H))
+        ctx.mask((x0 + x1) / 2 - caption_w / 2, (x0 + x1) / 2 + caption_w / 2,
+                 branch_top + SEQ_FRAME_TITLE_DY,
+                 branch_top + SEQ_FRAME_TITLE_DY + SEQ_TITLE_FONT * SEQ_LINE_H)
         ctx.frames.append(_text(
             caption, (x0 + x1) / 2 - caption_w / 2,
             branch_top + SEQ_FRAME_TITLE_DY, caption_w, SEQ_TITLE_FONT,
@@ -646,7 +703,8 @@ def _place_frame(block, cursor, ctx):
 
     tab = _base(new_id(), "rectangle", x0, top - SEQ_TAB_UP, tab_w, SEQ_TAB_H,
                 [], strokeColor=SEQ_FRAME_STROKE, backgroundColor=SEQ_TAB_FILL,
-                strokeWidth=2, roughness=1, roundness={"type": 3})
+                strokeWidth=2, roughness=1, roundness={"type": 3},
+                customData={"shadow": False})
     ctx.tabs.extend(_boxed(tab, block.kind, SEQ_FONT, SEQ_LABEL_TEXT))
     ctx.mark(x0, x1)
     return bottom
@@ -661,6 +719,7 @@ def convert_sequence(mermaid_text):
     band_top = 0.0
     ctx = Layout(order, autonumber)
     cursor = _walk(root, SEQ_HEADER_H, ctx)
+    ctx.close_bars(cursor)
     footer_top = cursor + SEQ_FOOTER_GAP
 
     headers, actors, lifelines = [], [], []
@@ -682,5 +741,6 @@ def convert_sequence(mermaid_text):
 
     # bottom-to-top: block backgrounds, notes,
     # lifelines, messages, frames, actor figures, top headers, tabs
-    return (ctx.backgrounds + lifelines + ctx.notes + ctx.messages
-            + ctx.frames + actors + headers + ctx.tabs)
+    return add_shadows(
+        ctx.backgrounds + lifelines + ctx.bars + ctx.masks + ctx.notes + ctx.messages
+        + ctx.frames + actors + headers + ctx.tabs)
