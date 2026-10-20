@@ -10,8 +10,8 @@
 #   -L          do not take the machine-wide gate lock (only for a gate the
 #               caller knows is independent, e.g. a tsc-only check)
 #
-# Only one gate runs at a time per machine: gate.sh takes flock on
-# ${XDG_RUNTIME_DIR:-/tmp}/claude-gate.lock and WAITS for it, logging
+# Only one gate runs at a time per toolchain (rust or frontend; make -k sweeps are rust):
+# gate.sh takes flock on ${XDG_RUNTIME_DIR:-/tmp}/claude-gate-<kind>.lock and WAITS for it, logging
 # "[waiting for another gate: held by ...]" every 30 s. TIMEOUT and STALL start
 # only once the lock is held. The command runs under nice -n 10 / ionice -c3
 # when those exist.
@@ -41,14 +41,48 @@ shift $((OPTIND - 1))
 [ $# -ge 2 ] || { echo "usage: gate.sh [-t secs] [-s secs] [-L] OUTPUT_FILE COMMAND..." >&2; exit 2; }
 
 OUT=$1; shift
+rm -f "$OUT.status"
+# Tokens of the command (quotes stripped) for classification and the guardrail.
+CMD_TOKENS=$(printf '%s' "$*" | tr -d "'\"" | tr -s '[:space:]' '\n')
+
+# Guardrail (only in repos whose Makefile has a `test-fast` target, i.e. audiovis): a lone plain
+# `make test` is the once-per-stage sweep. Refuse it unless FULL=1 is in the environment or on
+# the command line. Writes no .status file. Other repos are unaffected.
+if [ "${FULL:-}" != 1 ] && grep -qs "^test-fast:" Makefile; then
+  _full=0 _make=0 _rk=0 _targets=()
+  while IFS= read -r _t; do
+    [ -n "$_t" ] || continue
+    case $_t in
+      FULL=1) _full=1 ;;
+      RK=*) _rk=1 ;;
+      make) _make=1 ;;
+      -*|*=*) ;;
+      *) [ "$_make" -eq 1 ] && _targets+=("$_t") ;;
+    esac
+  done <<< "$CMD_TOKENS"
+  if [ "$_full" -eq 0 ] && [ "$_rk" -eq 0 ] && [ "${#_targets[@]}" -eq 1 ] && [ "${_targets[0]}" = test ]; then
+    echo "plain make test is the once-per-stage sweep: use make test-fast, RK=…, or make test FULL=1" >&2
+    exit 2
+  fi
+fi
+
 mkdir -p "$(dirname "$OUT")"
 : > "$OUT"
 rm -f "$OUT.status"
 
-# Machine-wide lock: one gate at a time. Wait (never fail); the log shows we are queued.
+# Per-toolchain lock (rust|frontend): one gate at a time per toolchain. Wait (never fail); the log shows we are queued.
 LOCKWAIT=0
 if [ "$NOLOCK" -eq 0 ] && command -v flock > /dev/null; then
-  LOCK=${XDG_RUNTIME_DIR:-/tmp}/claude-gate.lock
+  # One lock per toolchain: "frontend" only if the command has frontend tokens and no rust tokens.
+  _fe=0 _rs=0
+  while IFS= read -r _t; do
+    case $_t in
+      check-ui|test-ui|build-ui-deps|frontend-run|npm) _fe=1 ;;
+      lint|typecheck|test|test-fast|check-sync|gen|cargo|rust-run|build-rust-dev) _rs=1 ;;
+    esac
+  done <<< "$CMD_TOKENS"
+  KIND=rust; [ "$_fe" -eq 1 ] && [ "$_rs" -eq 0 ] && KIND=frontend
+  LOCK=${XDG_RUNTIME_DIR:-/tmp}/claude-gate-$KIND.lock
   exec 9> "$LOCK"
   WAIT_START=$(date +%s)
   while ! flock -n 9; do
