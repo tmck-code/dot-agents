@@ -400,17 +400,20 @@ apply to pure charts (pie, xychart-beta) or mindmaps.
 - **Background/async job boxes** (a Databricks job, a queue worker, any
   "runs later / not inline" process box): use a dashed stroke on a palette
   fill. Do not use a black or dark fill.
-- **Offset shadow**: behind every filled node rectangle that holds text, add a
-  duplicate rectangle with the same size and roundness, offset +6 px in x and
-  y. Set its `backgroundColor` and `strokeColor` both to the shape's stroke
-  color, `fillStyle: "solid"`, `strokeWidth: 1`, `opacity: 80`. It has no text
-  and no bindings. It shares the shape's `groupIds`. Place it immediately
-  before its shape in `elements`, with an `index` that sorts just before the
-  shape's. Skip legend swatches, full-width bands, the bottom summary box, and
-  dashed or unfilled shapes. Any filled shape type that holds text gets a
-  shadow (not only rectangles). To add shadows in bulk:
-  `python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]`.
-  The script skips legend swatches (size 26x20).
+- **Offset shadow**: `scripts/shadow.py` exposes
+  `add_shadows(elements, offset=6, opacity=80) -> list`. CLI:
+  `python3 -I scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]`.
+  Rule: a rectangle, diamond or ellipse gets a shadow when its fill is not
+  transparent, its stroke is solid, it is not a 26x20 legend swatch, and it has
+  a bound text child or `customData.shadow: true`. Set `customData.shadow: false`
+  to opt out. Each shadow carries `customData.shadowOf` (the node id). The
+  script is idempotent, so running it twice adds no second shadow. The shadow is
+  the same shape offset +6 px in x and y. Its `backgroundColor` and
+  `strokeColor` are the node's stroke color, with `fillStyle: "solid"`,
+  `strokeWidth: 1`, `opacity: 80`. It is inserted just before its node, with an
+  `index` lower than the node's. `convert.py` applies shadows once, in
+  `document()`. Pie and xychart output is excluded. For hand-written JSON, see
+  the Shadow template in `references/element-templates.md`.
 - **Legend**: every diagram has one, top-right by default. If that area holds a
   node, arrow or header, use the nearest free corner. One 26x20 swatch per concept,
   with its label in `#868e96`. Swatches have no shadow.
@@ -539,8 +542,22 @@ Editable files use `#ffffff` as `viewBackgroundColor`. A cream scene background 
 - Draw lifelines as narrow rectangles so arrows can bind to them. Or use lines split around labels.
 - Put notes above the lifelines.
 - Loop and par frames are dashed `#868e96` rectangles with a tab label.
-- Actor boxes appear only at the top.
-- Return arrows are dashed, not dotted.
+- Actors are drawn as stick figures, at the top only.
+- Return messages are dashed, not dotted.
+- `activate`/`deactivate` and the `->>+` / `-->>-` shorthand draw activation bars on the lifeline.
+
+## Generated Diagram Types (`scripts/convert.py`)
+
+- **Flowchart**: nodes have shadows. Edge labels have a white background.
+- **Class and ER tables**: one shadow sits behind the whole table box.
+- **ER format**: `--format full|min` (default `full`). `full` uses a grid layout with up to 3 entities per row. Relationship lines run in the gaps between cells and rows. `--no-examples` is kept for compatibility. `--format min` already covers it. Note: `--no-examples` alone still draws group containers; `min` does not.
+- **ER example rows**: add `%% example Entity: v1 | v2 | v3` lines, one per row. Values follow the attribute order. The entity is matched by id or label. Rows are padded or truncated to the attribute count. `min` ignores them. In `full`, the table sits below its entity. It has a thin grid, a header row, a mono font, a curved connector and an "example" caption.
+- **ER groups**: `%% group <Name> [color=<name>]: A, B`. In `full`, the group is a dashed, tinted container with no shadow. In both formats it sets the header colour of its entities. Colours: blue, green, orange, yellow, red, purple, indigo, gray. Without `color=`, colours cycle. Group members are placed in adjacent grid cells. A group that does not fit in the rest of a row starts a new row, so containers never overlap.
+- **ER notes**: `%% note <Entity or Group>: text` adds a caption tag. It works in both formats.
+- **ER commands**: `python3 -I scripts/convert.py --format full example-erd.mmd example-erd.excalidraw`, and `--format min example-erd.mmd example-erd-min.excalidraw`.
+- **Pie**: `scripts/pie.py`, run through `convert.py`. Wedges start at 12 o'clock, go clockwise, largest first. Fills are saturated, with a darker outline of the same hue. Label text colour follows fill luminance. There is no legend. Inside labels are `name` and `(pct%)`. With `showData` they are `name: value` and `(pct%)`. Percentages under 10% show one decimal. Small wedges get a plain leader line to an outside label, coloured as the wedge stroke. The title is size 28, fontFamily 5. `%% subtitle: text` adds a size-16 grey subtitle. No shadows.
+- **Gantt**: task bars have shadows. Status colors: done green, active blue, crit red, milestone amber. The legend lists only the statuses used. There is no Today marker (`todayMarker` is ignored).
+- **Xychart**: `xychart.py` takes `--legend "Signups,Churn"` for series names. See `example-xychart.mmd`. It draws no shadows.
 
 ## Element Templates
 

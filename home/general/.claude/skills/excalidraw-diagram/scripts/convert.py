@@ -16,7 +16,7 @@ Three input paths:
   rounded bars and a unit grid, styled after a hand-converted reference. See
   `gantt.py`.
 - `pie` (optionally `showData`) + `"label" : value` slices -> a hand-drawn
-  pie chart with solid-filled wedges, percentage labels and a swatch legend,
+  pie chart with solid-filled wedges, percentage labels, no legend,
   styled after a hand-drawn reference pie. See `pie.py`.
 - `sequenceDiagram` + `participant`/`actor` declarations, messages, notes and
   `par`/`loop`/`alt`/`opt`/`rect` blocks -> participant headers over grey
@@ -25,13 +25,20 @@ Three input paths:
 
 The diagram type is taken from the first directive line in the input.
 
-Usage: convert.py <input.mmd> <output.excalidraw>
+Usage: convert.py [--format full|min] [--no-examples] <input.mmd> <output.excalidraw>
 """
+import argparse
 import json
 import math
 import re
 import sys
+import textwrap
 import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).absolute().parent))  # -I drops it
+
+from shadow import add_shadows
 
 FONT_SIZE = 22
 FONT_FAMILY = 8  # matches the hand-converted reference boxes
@@ -75,6 +82,38 @@ ERD_CHAR_W = ERD_ROW_FONT * 0.6  # excalidraw's mono face
 ERD_MIN_WIDTH = 260.0
 ERD_COL_GAP = 240.0
 ERD_LABEL_FONT = 12
+EX_FONT = 12  # example-data tables
+EX_CHAR_W = EX_FONT * 0.6
+EX_ROW_H = 24.0
+EX_PAD_X = 8.0
+EX_GAP = 56.0  # entity bottom -> example table top
+EX_GRID = "#ced4da"
+EX_HEADER_FILL = "#f1f3f5"
+EX_COMMENT_RE = re.compile(r"^%%\s*example\s+(\S+)\s*:\s*(.*)$")
+GROUP_COMMENT_RE = re.compile(
+    r"^%%\s*group\s+(.+?)(?:\s+color=([\w-]+))?\s*:\s*(.*)$")
+NOTE_COMMENT_RE = re.compile(r"^%%\s*note\s+(.+?)\s*:\s*(.*)$")
+GP = 36.0  # container padding
+GROUP_TAG_GAP = 70.0  # extra room above a container for its caption tag
+NOTE_WRAP = 34
+NOTE_LINE_H = 15.0
+EX_SIDE_GAP = 70.0  # entity right edge -> example table, when placed beside
+MIN_ROW_GAP = 34.0
+MIN_LABEL_MARGIN = 40.0
+ERD_BODY_IN_GROUP = "#f8f9fa"
+# hue name -> (header band / container stroke, container secondary fill),
+# from references/color-palette.md
+ERD_HUES = {
+    "blue": ("#1971c2", "#e7f5ff"),
+    "green": ("#2f9e44", "#ebfbee"),
+    "orange": ("#f08c00", "#fff9db"),
+    "yellow": ("#f08c00", "#fff9db"),
+    "red": ("#e03131", "#fff5f5"),
+    "purple": ("#9c36b5", "#f8f0fc"),
+    "indigo": ("#4263eb", "#edf2ff"),
+    "gray": ("#868e96", "#f8f9fa"),
+}
+ERD_HUE_CYCLE = ["blue", "green", "orange", "red", "purple", "indigo"]
 ERD_LABEL_COLOR = "#868e96"
 ERD_LABEL_PAD = 6  # added to the estimated label width
 ERD_LABEL_MARGIN = 90.0  # visible line length each side of a label
@@ -258,7 +297,7 @@ def make_frame_less_box(node, color, stroke):
         "roughness": 0, "opacity": 100, "groupIds": group_ids, "frameId": None,
         "roundness": None, "seed": 1, "version": 1, "versionNonce": 1,
         "isDeleted": False, "boundElements": [], "updated": 1, "link": None,
-        "locked": False,
+        "locked": False, "customData": {"shadow": True},
     }
 
     title = {
@@ -377,9 +416,26 @@ class Entity(Node):
         super().__init__(entity_id, label)
         self.attrs = []  # list of (name, type, keys)
         self.rows = []   # rendered row strings, filled by size_entity
+        self.examples = []  # list of value lists from `%% example` comments
+        self.ex_cols = []   # example table column widths
+        self.ex_w = 0.0
+        self.ex_h = 0.0
+        self.beside = False  # example table to the right instead of below
+        self.group = None    # Group, set by parse_er
+        self.note = []       # wrapped caption-tag lines
+        self.note_h = 0.0    # space above the box taken by the tag
 
 
-def parse_er(text):
+class Group:
+    def __init__(self, name, color, members):
+        self.name = name
+        self.color = color
+        self.members = members
+        self.note = []
+        self.hue = None  # (stroke, secondary), set by parse_er
+
+
+def parse_er(text, examples=True):
     """Parse an `erDiagram` into (entities, relationships).
 
     Relationships are (left_id, right_id, left_card, right_card, dotted, label).
@@ -387,6 +443,8 @@ def parse_er(text):
     lines = [l.strip() for l in text.splitlines()]
     entities = {}
     rels = []
+    group_defs = []
+    notes = []
 
     def ensure(eid, label=None):
         if eid not in entities:
@@ -395,9 +453,28 @@ def parse_er(text):
             entities[eid].label = label
         return entities[eid]
 
+    pending = []
     i = 0
     while i < len(lines):
         line = lines[i]
+        gm = GROUP_COMMENT_RE.match(line)
+        if gm:
+            names = [n.strip() for n in gm.group(3).split(",") if n.strip()]
+            group_defs.append((gm.group(1).strip(), gm.group(2), names))
+            i += 1
+            continue
+        nm = NOTE_COMMENT_RE.match(line)
+        if nm:
+            notes.append((nm.group(1).strip(), nm.group(2).strip()))
+            i += 1
+            continue
+        em = EX_COMMENT_RE.match(line)
+        if em:
+            if examples:
+                pending.append((em.group(1),
+                                [v.strip() for v in em.group(2).split("|")]))
+            i += 1
+            continue
         if not line or line.startswith("erDiagram") or line.startswith("direction") \
                 or line.startswith("%%"):
             i += 1
@@ -435,7 +512,40 @@ def parse_er(text):
             continue
 
         i += 1
-    return entities, rels
+    for key, values in pending:
+        for entity in entities.values():
+            if key in (entity.id, entity.label):
+                entity.examples.append(values)
+    groups = []
+    for gi, (name, color, names) in enumerate(group_defs):
+        hue = color if color in ERD_HUES else ERD_HUE_CYCLE[gi % len(ERD_HUE_CYCLE)]
+        members = []
+        for entity in entities.values():
+            if entity.id in names or entity.label in names:
+                members.append(entity)
+        group = Group(name, hue, members)
+        group.hue = ERD_HUES[hue]
+        for entity in members:
+            entity.group = group
+        groups.append(group)
+    for key, text_ in notes:
+        lines_ = textwrap.wrap(text_, NOTE_WRAP) or [""]
+        target = next((e for e in entities.values() if key in (e.id, e.label)),
+                      None)
+        if target is None:
+            target = next((g for g in groups
+                           if g.name.lower() == key.lower()), None)
+        if target is not None:
+            target.note = lines_
+    for entity in entities.values():
+        if entity.note:
+            entity.note_h = note_size(entity.note)[1] + 10.0
+    return entities, rels, groups
+
+
+def note_size(lines):
+    w = max(len(l) for l in lines) * EX_CHAR_W + 16.0
+    return w, len(lines) * NOTE_LINE_H + 10.0
 
 
 def size_entity(entity):
@@ -457,36 +567,83 @@ def size_entity(entity):
         title_w + 2 * ERD_PAD_X,
     )
     entity.height = ERD_HEADER_H + ERD_ROW_H * len(entity.rows)
+    size_examples(entity)
+
+
+def example_header(entity):
+    return [a[0] for a in entity.attrs]
+
+
+def size_examples(entity):
+    """Set the column widths and size of the entity's example-data table."""
+    entity.ex_cols, entity.ex_w, entity.ex_h = [], 0.0, 0.0
+    if not entity.examples:
+        return
+    header = example_header(entity)
+    ncols = len(header)
+    grid = [header] + [(r + [""] * ncols)[:ncols] for r in entity.examples]
+    entity.ex_cols = [
+        max(len(row[c]) for row in grid) * EX_CHAR_W + 2 * EX_PAD_X
+        for c in range(ncols)
+    ]
+    entity.ex_w = sum(entity.ex_cols)
+    entity.ex_h = EX_ROW_H * len(grid)
 
 
 def erd_label_width(label):
     return math.ceil(len(label) * ERD_LABEL_FONT * 0.6) + ERD_LABEL_PAD
 
 
-def er_layout(entities, rels=()):
+def slot_height(entity):
+    """Note tag, entity, and the example table below it when there is one."""
+    below = EX_GAP + entity.ex_h if entity.ex_h and not entity.beside else 0.0
+    return entity.note_h + entity.height + below
+
+
+def slot_gap(a, b, full, row_gap):
+    if not full or a.group is b.group or not (a.group or b.group):
+        return row_gap
+    return row_gap + 2 * GP + (GROUP_TAG_GAP if b.group and b.group.note else 0)
+
+
+def er_layout(entities, rels=(), groups=(), fmt="full"):
+    full = fmt == "full"
+    row_gap = ERD_ROW_GAP if full else MIN_ROW_GAP
+    margin = ERD_LABEL_MARGIN if full else MIN_LABEL_MARGIN
+    base_gap = ERD_COL_GAP if full else ERD_COL_GAP / 2.0
+    pad_gap = 2 * GP if full and groups else 0.0
     for entity in entities.values():
         size_entity(entity)
     max_col = max((e.col for e in entities.values()), default=0)
     columns = {c: [] for c in range(max_col + 1)}
     for entity in entities.values():
         columns[entity.col].append(entity)
-    gaps = {c: ERD_COL_GAP for c in range(max_col + 1)}
+        entity.beside = bool(full and entity.ex_h and entity.col == max_col)
+    order = {id(g): i for i, g in enumerate(groups)}
+    for col in columns.values():  # keep group members next to each other
+        col.sort(key=lambda e: order[id(e.group)] if e.group else -1)
+    gaps = {c: base_gap + pad_gap for c in range(max_col + 1)}
     for left, right, _lc, _rc, _dot, label in rels:
         a, b = entities[left], entities[right]
         lo = min(a.col, b.col)
-        need = erd_label_width(label) + 2 * ERD_LABEL_MARGIN if label else 0
-        gaps[lo] = max(gaps[lo], need)
-    x = 0.0
+        need = erd_label_width(label) + 2 * margin if label else 0
+        gaps[lo] = max(gaps[lo], need + pad_gap)
+    x = pad_gap / 2.0
     for c in range(max_col + 1):
         col_entities = columns[c]
-        total_h = (sum(e.height for e in col_entities)
-                   + ERD_ROW_GAP * max(0, len(col_entities) - 1))
+        gap_sum = sum(slot_gap(a, b, full, row_gap)
+                      for a, b in zip(col_entities, col_entities[1:]))
+        total_h = sum(slot_height(e) for e in col_entities) + gap_sum
         y = -total_h / 2.0
-        for e in col_entities:
+        for i, e in enumerate(col_entities):
             e.x = x
-            e.y = y
-            y += e.height + ERD_ROW_GAP
-        x += max((e.width for e in col_entities), default=ERD_MIN_WIDTH) + gaps[c]
+            e.y = y + e.note_h
+            y += slot_height(e)
+            if i + 1 < len(col_entities):
+                y += slot_gap(e, col_entities[i + 1], full, row_gap)
+        x += max((e.width + EX_SIDE_GAP + e.ex_w if e.beside
+                  else max(e.width, e.ex_w) for e in col_entities),
+                 default=ERD_MIN_WIDTH) + gaps[c]
 
 
 def _base(el_id, el_type, x, y, width, height, group_ids, **extra):
@@ -524,10 +681,12 @@ def make_erd_table(entity, accent, tint):
     # body tint, then the header band, then the outer border on top
     els.append(_base(new_id(), "rectangle", entity.x, entity.y,
                      entity.width, entity.height, group_ids,
-                     strokeColor=accent, backgroundColor=tint))
+                     strokeColor=accent, backgroundColor=tint,
+                     customData={"shadow": True}))
     els.append(_base(new_id(), "rectangle", entity.x, entity.y,
                      entity.width, ERD_HEADER_H, group_ids,
-                     strokeColor=accent, backgroundColor=accent))
+                     strokeColor=accent, backgroundColor=accent,
+                     customData={"shadow": False}))
     rect_id = new_id()
     entity.rect_id = rect_id
     els.append(_base(rect_id, "rectangle", entity.x, entity.y,
@@ -560,28 +719,110 @@ def make_erd_table(entity, accent, tint):
     return els
 
 
+def make_example_table(entity, accent):
+    """Thin-grid example-data table, caption and curved connector."""
+    group_ids = [new_id()]
+    if entity.beside:
+        x0, y0 = entity.x + entity.width + EX_SIDE_GAP, entity.y + EX_ROW_H
+    else:
+        x0, y0 = entity.x, entity.y + entity.height + EX_GAP
+    w, h = entity.ex_w, entity.ex_h
+    no_shadow = {"shadow": False}
+    els = []
+    els.append(_base(new_id(), "rectangle", x0, y0, w, EX_ROW_H, group_ids,
+                     strokeColor=EX_GRID, backgroundColor=EX_HEADER_FILL,
+                     customData=no_shadow))
+    els.append(_base(new_id(), "rectangle", x0, y0, w, h, group_ids,
+                     strokeColor=EX_GRID, customData=no_shadow))
+
+    def grid_line(x, y, dx, dy):
+        return _base(new_id(), "line", x, y, dx, dy, group_ids,
+                     strokeColor=EX_GRID, points=[[0, 0], [dx, dy]],
+                     startBinding=None, endBinding=None,
+                     startArrowhead=None, endArrowhead=None,
+                     lastCommittedPoint=None, polygon=False,
+                     boundElements=None)
+
+    nrows = len(entity.examples) + 1
+    for r in range(1, nrows):
+        els.append(grid_line(x0, y0 + r * EX_ROW_H, w, 0.0))
+    cx = x0
+    for width in entity.ex_cols[:-1]:
+        cx += width
+        els.append(grid_line(cx, y0, 0.0, h))
+    header = example_header(entity)
+    grid = [header] + [(r + [""] * len(header))[:len(header)]
+                       for r in entity.examples]
+    dy = (EX_ROW_H - EX_FONT * 1.25) / 2.0
+    for r, row in enumerate(grid):
+        cx = x0
+        for c, value in enumerate(row):
+            color = ERD_TEXT_COLOR if r else accent
+            els.append(_erd_text(value, cx + EX_PAD_X, y0 + r * EX_ROW_H + dy,
+                                 entity.ex_cols[c] - 2 * EX_PAD_X, color,
+                                 EX_FONT, "left", group_ids))
+            cx += entity.ex_cols[c]
+
+    if entity.beside:  # short straight connector, entity edge -> table
+        ay = y0 + EX_ROW_H / 2.0
+        els.append(_base(
+            new_id(), "arrow", entity.x + entity.width + 2.0, ay,
+            EX_SIDE_GAP - 4.0, 0.0, [], strokeColor=accent, strokeWidth=1,
+            points=[[0, 0], [EX_SIDE_GAP - 4.0, 0]],
+            lastCommittedPoint=None, startBinding=None, endBinding=None,
+            startArrowhead=None, endArrowhead="arrow", elbowed=False))
+    else:
+        # curved connector: entity bottom -> table top, small head at the table
+        ax = x0 + min(36.0, entity.width / 4.0)
+        bx = ax + 14.0
+        span = EX_GAP - 4.0
+        els.append(_base(
+            new_id(), "arrow", ax, entity.y + entity.height + 2.0,
+            bx - ax, span, [], strokeColor=accent, strokeWidth=1,
+            roundness={"type": 2},
+            points=[[0, 0], [-10, span / 2.0], [bx - ax, span]],
+            lastCommittedPoint=None, startBinding=None, endBinding=None,
+            startArrowhead=None, endArrowhead="arrow",
+            elbowed=False))
+
+    cap_w = 7 * EX_CHAR_W + 4
+    els.append(_erd_text("example", x0 + w - cap_w, y0 - EX_FONT * 1.25 - 4,
+                         cap_w, ERD_LABEL_COLOR, EX_FONT, "right", []))
+    return els
+
+
 def make_er_arrow(left, right, lcard, rcard, dotted, label):
     """Elbowed relationship arrow with crowfoot arrowheads at both ends."""
     start_x = left.x + left.width
-    start_y = left.y + left.height / 2.0
     end_x = right.x
-    end_y = right.y + right.height / 2.0
+    top = max(left.y, right.y)
+    bottom = min(left.y + left.height, right.y + right.height)
+    if top < bottom:  # side by side: one shared y keeps the line straight
+        start_y = end_y = (top + bottom) / 2.0
+    else:
+        start_y = left.y + left.height / 2.0
+        end_y = right.y + right.height / 2.0
     mid_x = (start_x + end_x) / 2.0
     dx_end = end_x - start_x
-    points = [
-        [0, 0],
-        [mid_x - start_x, 0],
-        [mid_x - start_x, end_y - start_y],
-        [dx_end, end_y - start_y],
-    ]
+    if start_y == end_y:
+        points = [[0, 0], [dx_end, 0]]
+    else:
+        points = [
+            [0, 0],
+            [mid_x - start_x, 0],
+            [mid_x - start_x, end_y - start_y],
+            [dx_end, end_y - start_y],
+        ]
+    fp_l = (start_y - left.y) / left.height
+    fp_r = (end_y - right.y) / right.height
     arrow = _base(
         new_id(), "arrow", start_x, start_y, abs(dx_end), abs(end_y - start_y),
         [], strokeWidth=2, strokeStyle="dashed" if dotted else "solid",
         points=points, lastCommittedPoint=None,
         startBinding={"elementId": left.rect_id, "mode": "orbit",
-                      "fixedPoint": [1.0, 0.5]},
+                      "fixedPoint": [1.0, fp_l]},
         endBinding={"elementId": right.rect_id, "mode": "orbit",
-                    "fixedPoint": [0.0, 0.5]},
+                    "fixedPoint": [0.0, fp_r]},
         startArrowhead=ERD_ARROWHEADS.get(lcard),
         endArrowhead=ERD_ARROWHEADS.get(rcard),
         elbowed=True, fixedSegments=None,
@@ -602,18 +843,314 @@ def make_er_arrow(left, right, lcard, rcard, dotted, label):
     return els
 
 
-def convert_er(mermaid_text):
-    entities, rels = parse_er(mermaid_text)
-    compute_columns(entities, [(l, r, None, None) for l, r, *_ in rels])
-    er_layout(entities, rels)
+LANE_STEP = 20.0  # spacing of parallel relationship lines in a channel
+GRID_MAX_COLS = 3
+TAG_ZONE = 56.0  # room above a container for its caption tag
+
+
+def grid_columns(count):
+    """Entities per row: one row up to 3 entities, else ceil(sqrt(n)), max 3."""
+    if count <= GRID_MAX_COLS:
+        return max(count, 1)
+    return min(GRID_MAX_COLS, math.ceil(math.sqrt(count)))
+
+
+def place_grid(entities):
+    """Set row and col on each entity, keeping each group's members adjacent.
+
+    A group is placed as one block in consecutive cells of one row. If it does
+    not fit in what is left of the row it starts a new row. A group wider than
+    a row fills whole rows and the next block starts on a new row, so a
+    container never encloses a non-member.
+    """
+    ncols = grid_columns(len(entities))
+    blocks, seen = [], set()
+    for entity in entities:
+        if id(entity) in seen:
+            continue
+        block = entity.group.members if entity.group else [entity]
+        seen.update(id(m) for m in block)
+        blocks.append(block)
+    row = col = 0
+    for block in blocks:
+        grouped = block[0].group is not None
+        if grouped and col and col + len(block) > ncols:
+            row, col = row + 1, 0
+        for member in block:
+            if col >= ncols:
+                row, col = row + 1, 0
+            member.row, member.col = row, col
+            col += 1
+        if grouped and len(block) > ncols and col:
+            row, col = row + 1, 0
+
+
+def port_offset(entity, index):
+    """Distance from the entity top of its index-th connection point."""
+    return min(ERD_HEADER_H + ERD_ROW_H * (0.5 + index),
+               entity.height - 12.0)
+
+
+def plan_routes(entities, rels):
+    """Choose a path kind, sides and connection points per relationship."""
+    plans, ports, channels = [], {}, {}
+    for left, right, lcard, rcard, dotted, label in rels:
+        a, b = entities[left], entities[right]
+        if a is b:
+            continue
+        if (b.col, b.row) < (a.col, a.row):
+            a, b, lcard, rcard = b, a, rcard, lcard
+        plan = {"a": a, "b": b, "lcard": lcard, "rcard": rcard,
+                "dotted": dotted, "label": label,
+                "side_b": "R" if b.col == a.col else "L",
+                "kind": "dogleg" if b.col <= a.col + 1 else "channel"}
+        if plan["kind"] == "channel":
+            plan["crow"] = max(a.row, b.row)
+            plan["clane"] = len(channels.setdefault(plan["crow"], []))
+            channels[plan["crow"]].append(plan)
+        for ent, side, key in ((a, "R", "port_a"), (b, plan["side_b"], "port_b")):
+            other = b if ent is a else a
+            if plan["kind"] == "channel":
+                way = -1 if plan["crow"] == ent.row else 1
+            else:
+                way = (other.row > ent.row) - (other.row < ent.row)
+            used = ports.setdefault((id(ent), side, way), [])
+            # lines going up use the top rows, level lines the middle, and
+            # lines going down the bottom, so lines do not cross each other
+            plan[key] = port_offset(ent, {-1: 0, 0: 2, 1: 3}[way] + len(used))
+            used.append(plan)
+        plans.append(plan)
+    return plans, channels
+
+
+def assign_lanes(uses):
+    """Give each (span, plan, key) use a lane; spans that miss share a lane."""
+    lanes = []  # per lane: list of occupied (lo, hi) spans
+    for lo, hi, plan, key in sorted(uses, key=lambda u: (u[0], u[1])):
+        for k, spans in enumerate(lanes):
+            if all(hi + 8.0 < s_lo or lo - 8.0 > s_hi for s_lo, s_hi in spans):
+                break
+        else:
+            k = len(lanes)
+            lanes.append([])
+        lanes[k].append((lo, hi))
+        plan[key] = k
+    return len(lanes)
+
+
+def grid_layout(entities, rels, groups):
+    """Lay entities out in a grid and route relationships between cells.
+
+    Returns one route per relationship: a dict holding the two entities,
+    cardinalities, label and the absolute polyline points.
+    """
+    ents = list(entities.values())
+    for entity in ents:
+        size_entity(entity)
+        entity.beside = False
+    place_grid(ents)
+    nrows = max(e.row for e in ents) + 1
+    ncols = max(e.col for e in ents) + 1
+    plans, channels = plan_routes(entities, rels)
+    tag_zone = TAG_ZONE if any(g.note for g in groups) else 0.0
+
+    # vertical layout does not depend on lanes, so do it first
+    row_h = [max((slot_height(e) for e in ents if e.row == r), default=0.0)
+             for r in range(nrows)]
+    row_top, y = [], 0.0
+    for r in range(nrows):
+        if r:
+            y += (2 * GP + tag_zone + 30.0
+                  + LANE_STEP * len(channels.get(r, [])))
+        row_top.append(y)
+        y += row_h[r]
+    for entity in ents:
+        entity.y = row_top[entity.row] + entity.note_h
+
+    label_h = math.ceil(ERD_LABEL_FONT * 1.25)
+    uses = {}
+    for p in plans:
+        a, b = p["a"], p["b"]
+        p["y1"], p["y2"] = a.y + p["port_a"], b.y + p["port_b"]
+        if p["kind"] == "dogleg":
+            mid = (p["y1"] + p["y2"]) / 2.0
+            lo = min(p["y1"], p["y2"], mid - label_h)
+            hi = max(p["y1"], p["y2"], mid + label_h)
+            uses.setdefault(a.col, []).append((lo, hi, p, "lane"))
+        else:
+            p["yc"] = (row_top[p["crow"]] - GP - tag_zone - 10.0
+                       - LANE_STEP * p["clane"])
+            p["gutter_b"] = b.col - 1
+            uses.setdefault(a.col, []).append(
+                (min(p["y1"], p["yc"]), max(p["y1"], p["yc"]), p, "lane"))
+            uses.setdefault(b.col - 1, []).append(
+                (min(p["y2"], p["yc"]), max(p["y2"], p["yc"]), p, "lane_b"))
+
+    gutter_w, first_lane, step = {}, {}, {}
+    for g in range(ncols - 1):
+        n = assign_lanes(uses.get(g, []))
+        widest = max((erd_label_width(p["label"]) for _l, _h, p, key
+                      in uses.get(g, []) if p["label"]
+                      and p["kind"] == "dogleg"), default=0)
+        step[g] = widest + 14.0 if widest else 16.0
+        first_lane[g] = GP + 12.0 + widest / 2.0
+        gutter_w[g] = 2 * GP + 24.0 + widest + max(n - 1, 0) * step[g]
+    col_w = [max((max(e.width, e.ex_w) for e in ents if e.col == c),
+                 default=ERD_MIN_WIDTH) for c in range(ncols)]
+    col_x, x = [], GP
+    for c in range(ncols):
+        col_x.append(x)
+        x += col_w[c] + gutter_w.get(c, 0.0)
+    for entity in ents:
+        entity.x = col_x[entity.col]
+
+    def lane_x(g, k):
+        return col_x[g] + col_w[g] + first_lane[g] + k * step[g]
+
+    routes = []
+    for p in plans:
+        a, b = p["a"], p["b"]
+        xa, y1, y2 = a.x + a.width, p["y1"], p["y2"]
+        xe = b.x if p["side_b"] == "L" else b.x + b.width
+        xl = lane_x(a.col, p["lane"])
+        if p["kind"] == "dogleg":
+            pts = [(xa, y1), (xl, y1), (xl, y2), (xe, y2)]
+            lx, ly = xl, (y1 + y2) / 2.0
+            if y1 == y2 and p["side_b"] == "L":
+                pts = [(xa, y1), (xe, y2)]
+        else:
+            xt = lane_x(p["gutter_b"], p["lane_b"])
+            yc = p["yc"]
+            pts = [(xa, y1), (xl, y1), (xl, yc), (xt, yc), (xt, y2), (xe, y2)]
+            lx, ly = (xl + xt) / 2.0, yc
+        routes.append({**p, "points": pts, "label_at": (lx, ly)})
+    return routes
+
+
+def make_grid_arrow(route):
+    """Polyline relationship arrow with crowfoot heads and a centred label."""
+    a, b = route["a"], route["b"]
+    x0, y0 = route["points"][0]
+    rel = [[px - x0, py - y0] for px, py in route["points"]]
+    xs, ys = [p[0] for p in rel], [p[1] for p in rel]
+    end_fx = 0.0 if route["side_b"] == "L" else 1.0
+    arrow = _base(
+        new_id(), "arrow", x0, y0, max(xs) - min(xs), max(ys) - min(ys),
+        [], strokeWidth=2, strokeStyle="dashed" if route["dotted"] else "solid",
+        points=rel, lastCommittedPoint=None,
+        startBinding={"elementId": a.rect_id, "mode": "orbit",
+                      "fixedPoint": [1.0, route["port_a"] / a.height]},
+        endBinding={"elementId": b.rect_id, "mode": "orbit",
+                    "fixedPoint": [end_fx, route["port_b"] / b.height]},
+        startArrowhead=ERD_ARROWHEADS.get(route["lcard"]),
+        endArrowhead=ERD_ARROWHEADS.get(route["rcard"]),
+        elbowed=True, fixedSegments=None,
+        startIsSpecial=None, endIsSpecial=None,
+    )
+    els = [arrow]
+    label = route["label"]
+    if label:
+        label_w = erd_label_width(label)
+        label_h = math.ceil(ERD_LABEL_FONT * 1.25)
+        lx, ly = route["label_at"]
+        text = _erd_text(label, lx - label_w / 2.0, ly - label_h / 2.0,
+                         label_w, ERD_LABEL_COLOR, ERD_LABEL_FONT, "center", [])
+        text["height"] = label_h
+        text["containerId"] = arrow["id"]
+        text["verticalAlign"] = "middle"
+        arrow["boundElements"] = [{"id": text["id"], "type": "text"}]
+        els.append(text)
+    return els
+
+
+def make_note_tag(lines, x, y, stroke):
+    """Small caption tag with its top-left corner at (x, y)."""
+    w, h = note_size(lines)
+    els = [_base(new_id(), "rectangle", x, y, w, h, [], strokeColor=stroke,
+                 backgroundColor=ERD_BODY_IN_GROUP, roundness={"type": 3},
+                 customData={"shadow": True})]
+    els.append(_erd_text("\n".join(lines), x + 8.0, y + 5.0, w - 16.0,
+                         ERD_TEXT_COLOR, EX_FONT, "left", []))
+    els[-1]["height"] = len(lines) * EX_FONT * 1.25
+    return els, w, h
+
+
+def entity_bounds(entity):
+    x0, y0 = entity.x, entity.y - entity.note_h
+    x1, y1 = entity.x + entity.width, entity.y + entity.height
+    if entity.ex_h and entity.beside:
+        x1 = entity.x + entity.width + EX_SIDE_GAP + entity.ex_w
+        y1 = max(y1, entity.y + EX_ROW_H + entity.ex_h)
+    elif entity.ex_h:
+        x1 = max(x1, entity.x + entity.ex_w)
+        y1 = y1 + EX_GAP + entity.ex_h
+    return x0, y0, x1, y1
+
+
+def make_group_container(group):
+    """Dashed, soft-tinted container around the group's entities (+ tag)."""
+    boxes = [entity_bounds(e) for e in group.members]
+    x0 = min(b[0] for b in boxes) - GP
+    y0 = min(b[1] for b in boxes) - GP
+    x1 = max(b[2] for b in boxes) + GP
+    y1 = max(b[3] for b in boxes) + GP
+    stroke, fill = group.hue
+    # shadow.py skips dashed shapes, so the container has no shadow
+    els = [_base(new_id(), "rectangle", x0, y0, x1 - x0, y1 - y0, [],
+                 strokeColor=stroke, backgroundColor=fill, strokeStyle="dashed",
+                 roundness={"type": 3}, customData={"shadow": False})]
+    if group.note:
+        tag, _w, h = make_note_tag(group.note, x0 + 24.0, 0.0, stroke)
+        dy = y0 - h + 8.0
+        for el in tag:
+            el["y"] += dy
+        els.extend(tag)
+    return els
+
+
+def convert_er(mermaid_text, examples=True, fmt="full"):
+    full = fmt == "full"
+    entities, rels, groups = parse_er(mermaid_text, examples and full)
+    routes = []
+    if full:
+        routes = grid_layout(entities, rels, groups)
+    else:
+        compute_columns(entities, [(l, r, None, None) for l, r, *_ in rels])
+        er_layout(entities, rels, groups, fmt)
+        # no containers: fold a group caption into its first member
+        for group in groups:
+            if group.note and group.members:
+                first = group.members[0]
+                first.note = group.note + first.note
+                first.note_h = note_size(first.note)[1] + 10.0
+        er_layout(entities, rels, groups, fmt)
 
     elements = []
+    if full:
+        for group in groups:
+            if group.members:
+                elements.extend(make_group_container(group))
     for idx, entity in enumerate(entities.values()):
-        accent, tint = ERD_PALETTE[idx % len(ERD_PALETTE)]
+        if entity.group:
+            accent, tint = entity.group.hue[0], entity.group.hue[1]
+            if full:
+                tint = ERD_BODY_IN_GROUP
+        else:
+            accent, tint = ERD_PALETTE[idx % len(ERD_PALETTE)]
         elements.extend(make_erd_table(entity, accent, tint))
-
+        if entity.ex_h:
+            elements.extend(make_example_table(entity, accent))
+        if entity.note:
+            tag, _w, h = make_note_tag(entity.note, entity.x,
+                                       entity.y - entity.note_h + 2.0, accent)
+            elements.extend(tag)
     bound = {eid: [] for eid in entities}
-    for left, right, lcard, rcard, dotted, label in rels:
+    for route in routes:
+        arrow_els = make_grid_arrow(route)
+        elements.extend(arrow_els)
+        bound[route["a"].id].append(arrow_els[0]["id"])
+        bound[route["b"].id].append(arrow_els[0]["id"])
+    for left, right, lcard, rcard, dotted, label in ([] if full else rels):
         a, b = entities[left], entities[right]
         if a.col > b.col:  # always draw left-to-right
             a, b = b, a
@@ -632,7 +1169,7 @@ def convert_er(mermaid_text):
     return elements
 
 
-def convert(mermaid_text):
+def convert(mermaid_text, examples=True, fmt="full"):
     if re.search(r'^\s*(?:flowchart|graph)\s', mermaid_text, re.M):
         from flowchart import convert_flowchart
         return document(convert_flowchart(mermaid_text))
@@ -641,16 +1178,16 @@ def convert(mermaid_text):
         return document(convert_gantt(mermaid_text))
     if re.search(r'^\s*pie\b', mermaid_text, re.M):
         from pie import convert_pie
-        return document(convert_pie(mermaid_text))
+        return document(convert_pie(mermaid_text), shadows=False)
     if re.search(r'^\s*xychart-beta\b', mermaid_text, re.M):
         # no legend names via this path; run xychart.py directly for --legend
         from xychart import convert_xychart
-        return document(convert_xychart(mermaid_text))
+        return document(convert_xychart(mermaid_text), shadows=False)
     if re.search(r'^\s*sequenceDiagram\b', mermaid_text, re.M):
         from sequence import convert_sequence
         return document(convert_sequence(mermaid_text))
     if re.search(r'^\s*erDiagram\b', mermaid_text, re.M):
-        elements = convert_er(mermaid_text)
+        elements = convert_er(mermaid_text, examples, fmt)
         return document(elements)
     nodes, edges = parse_mermaid(mermaid_text)
     outgoing = compute_columns(nodes, edges)
@@ -713,7 +1250,10 @@ def finalise(elements):
     return elements
 
 
-def document(elements):
+def document(elements, shadows=True):
+    """Wrap elements in a scene; shadows=False skips add_shadows (pie, xychart)."""
+    if shadows:
+        elements = add_shadows(elements)
     finalise(elements)
     return {
         "type": "excalidraw",
@@ -726,13 +1266,19 @@ def document(elements):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print("usage: convert.py <input.mmd> <output.excalidraw>", file=sys.stderr)
-        sys.exit(1)
-    with open(sys.argv[1]) as f:
+    ap = argparse.ArgumentParser(description="Convert mermaid to Excalidraw.")
+    ap.add_argument("src")
+    ap.add_argument("dst")
+    ap.add_argument("--format", choices=["full", "min"], default="full",
+                    help="erDiagram only: full (containers, example tables) "
+                         "or min (entity tables only)")
+    ap.add_argument("--no-examples", action="store_true",
+                    help="ignore ER `%% example` rows (implied by --format min)")
+    args = ap.parse_args()
+    with open(args.src) as f:
         text = f.read()
-    doc = convert(text)
-    with open(sys.argv[2], "w") as f:
+    doc = convert(text, not args.no_examples, args.format)
+    with open(args.dst, "w") as f:
         json.dump(doc, f, indent=2)
 
 
