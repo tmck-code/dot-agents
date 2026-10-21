@@ -94,6 +94,8 @@ GROUP_COMMENT_RE = re.compile(
     r"^%%\s*group\s+(.+?)(?:\s+color=([\w-]+))?\s*:\s*(.*)$")
 NOTE_COMMENT_RE = re.compile(r"^%%\s*note\s+(.+?)\s*:\s*(.*)$")
 GP = 36.0  # container padding
+COMPACT_STEP = 18.0  # min format: spacing of parallel lines
+MIN_GP = 14.0  # min format: half-gap between cells
 GROUP_TAG_GAP = 70.0  # extra room above a container for its caption tag
 NOTE_WRAP = 34
 NOTE_LINE_H = 15.0
@@ -848,14 +850,18 @@ GRID_MAX_COLS = 3
 TAG_ZONE = 56.0  # room above a container for its caption tag
 
 
-def grid_columns(count):
-    """Entities per row: one row up to 3 entities, else ceil(sqrt(n)), max 3."""
+def grid_columns(count, compact=False):
+    """Entities per row: one row up to 3 entities, else ceil(sqrt(n)), max 3.
+
+    The compact (min) grid allows 4 per row once there are 9 or more.
+    """
+    cap = 4 if compact and count >= 9 else GRID_MAX_COLS
     if count <= GRID_MAX_COLS:
         return max(count, 1)
-    return min(GRID_MAX_COLS, math.ceil(math.sqrt(count)))
+    return min(cap, math.ceil(math.sqrt(count)))
 
 
-def place_grid(entities):
+def place_grid(entities, compact=False):
     """Set row and col on each entity, keeping each group's members adjacent.
 
     A group is placed as one block in consecutive cells of one row. If it does
@@ -863,7 +869,7 @@ def place_grid(entities):
     a row fills whole rows and the next block starts on a new row, so a
     container never encloses a non-member.
     """
-    ncols = grid_columns(len(entities))
+    ncols = grid_columns(len(entities), compact)
     blocks, seen = [], set()
     for entity in entities:
         if id(entity) in seen:
@@ -938,7 +944,37 @@ def assign_lanes(uses):
     return len(lanes)
 
 
-def grid_layout(entities, rels, groups):
+def assign_lanes_close(uses, step):
+    """Like assign_lanes, but lanes are `step` apart, so a label stays clear.
+
+    A line with a label centred on it also keeps the lanes within half the
+    label width free where their y spans overlap.
+    """
+    def reach(plan):
+        if plan["kind"] != "dogleg" or not plan["label"]:
+            return 0
+        return math.ceil((erd_label_width(plan["label"]) / 2.0 + 6.0) / step)
+
+    lanes = []  # per lane: list of (lo, hi, reach)
+    for lo, hi, plan, key in sorted(uses, key=lambda u: (u[0], u[1])):
+        mine = reach(plan)
+        for k in range(len(lanes) + 1):
+            if k == len(lanes):
+                lanes.append([])
+                break
+            clash = any(
+                abs(j - k) <= max(mine, r) and not (hi + 8.0 < s_lo
+                                                    or lo - 8.0 > s_hi)
+                for j, spans in enumerate(lanes)
+                for s_lo, s_hi, r in spans)
+            if not clash:
+                break
+        lanes[k].append((lo, hi, mine))
+        plan[key] = k
+    return len(lanes)
+
+
+def grid_layout(entities, rels, groups, compact=False):
     """Lay entities out in a grid and route relationships between cells.
 
     Returns one route per relationship: a dict holding the two entities,
@@ -948,11 +984,12 @@ def grid_layout(entities, rels, groups):
     for entity in ents:
         size_entity(entity)
         entity.beside = False
-    place_grid(ents)
+    place_grid(ents, compact)
+    gp = MIN_GP if compact else GP
     nrows = max(e.row for e in ents) + 1
     ncols = max(e.col for e in ents) + 1
     plans, channels = plan_routes(entities, rels)
-    tag_zone = TAG_ZONE if any(g.note for g in groups) else 0.0
+    tag_zone = TAG_ZONE if not compact and any(g.note for g in groups) else 0.0
 
     # vertical layout does not depend on lanes, so do it first
     row_h = [max((slot_height(e) for e in ents if e.row == r), default=0.0)
@@ -960,7 +997,7 @@ def grid_layout(entities, rels, groups):
     row_top, y = [], 0.0
     for r in range(nrows):
         if r:
-            y += (2 * GP + tag_zone + 30.0
+            y += (2 * gp + tag_zone + 30.0
                   + LANE_STEP * len(channels.get(r, [])))
         row_top.append(y)
         y += row_h[r]
@@ -978,7 +1015,7 @@ def grid_layout(entities, rels, groups):
             hi = max(p["y1"], p["y2"], mid + label_h)
             uses.setdefault(a.col, []).append((lo, hi, p, "lane"))
         else:
-            p["yc"] = (row_top[p["crow"]] - GP - tag_zone - 10.0
+            p["yc"] = (row_top[p["crow"]] - gp - tag_zone - 10.0
                        - LANE_STEP * p["clane"])
             p["gutter_b"] = b.col - 1
             uses.setdefault(a.col, []).append(
@@ -988,16 +1025,18 @@ def grid_layout(entities, rels, groups):
 
     gutter_w, first_lane, step = {}, {}, {}
     for g in range(ncols - 1):
-        n = assign_lanes(uses.get(g, []))
+        n = (assign_lanes_close(uses.get(g, []), COMPACT_STEP) if compact
+             else assign_lanes(uses.get(g, [])))
         widest = max((erd_label_width(p["label"]) for _l, _h, p, key
                       in uses.get(g, []) if p["label"]
                       and p["kind"] == "dogleg"), default=0)
-        step[g] = widest + 14.0 if widest else 16.0
-        first_lane[g] = GP + 12.0 + widest / 2.0
-        gutter_w[g] = 2 * GP + 24.0 + widest + max(n - 1, 0) * step[g]
+        step[g] = (COMPACT_STEP if compact
+                   else widest + 14.0 if widest else 16.0)
+        first_lane[g] = gp + 12.0 + widest / 2.0
+        gutter_w[g] = 2 * gp + 24.0 + widest + max(n - 1, 0) * step[g]
     col_w = [max((max(e.width, e.ex_w) for e in ents if e.col == c),
                  default=ERD_MIN_WIDTH) for c in range(ncols)]
-    col_x, x = [], GP
+    col_x, x = [], gp
     for c in range(ncols):
         col_x.append(x)
         x += col_w[c] + gutter_w.get(c, 0.0)
@@ -1111,19 +1150,14 @@ def make_group_container(group):
 def convert_er(mermaid_text, examples=True, fmt="full"):
     full = fmt == "full"
     entities, rels, groups = parse_er(mermaid_text, examples and full)
-    routes = []
-    if full:
-        routes = grid_layout(entities, rels, groups)
-    else:
-        compute_columns(entities, [(l, r, None, None) for l, r, *_ in rels])
-        er_layout(entities, rels, groups, fmt)
+    if not full:
         # no containers: fold a group caption into its first member
         for group in groups:
             if group.note and group.members:
                 first = group.members[0]
                 first.note = group.note + first.note
                 first.note_h = note_size(first.note)[1] + 10.0
-        er_layout(entities, rels, groups, fmt)
+    routes = grid_layout(entities, rels, groups, compact=not full)
 
     elements = []
     if full:
@@ -1150,15 +1184,6 @@ def convert_er(mermaid_text, examples=True, fmt="full"):
         elements.extend(arrow_els)
         bound[route["a"].id].append(arrow_els[0]["id"])
         bound[route["b"].id].append(arrow_els[0]["id"])
-    for left, right, lcard, rcard, dotted, label in ([] if full else rels):
-        a, b = entities[left], entities[right]
-        if a.col > b.col:  # always draw left-to-right
-            a, b = b, a
-            lcard, rcard = rcard, lcard
-        arrow_els = make_er_arrow(a, b, lcard, rcard, dotted, label)
-        elements.extend(arrow_els)
-        bound[a.id].append(arrow_els[0]["id"])
-        bound[b.id].append(arrow_els[0]["id"])
 
     by_id = {e["id"]: e for e in elements}
     for entity in entities.values():
