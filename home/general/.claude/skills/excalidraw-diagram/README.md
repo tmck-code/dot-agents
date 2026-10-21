@@ -75,3 +75,7 @@ excalidraw-diagram/
     render_template.html            # Browser template for rendering
     pyproject.toml                  # Python dependencies (playwright)
 ```
+
+## Icons
+
+`references/icons/` holds 48 reusable icons (status markers, logos, avatars, devices, dials), one `.excalidraw` scene each plus `index.json`. Image-based icons embed their file. Use `python3 scripts/icon.py list [query]`, `add <diagram> <icon> --x X --y Y [--size S] [--label TEXT]`, or `sheet <out.excalidraw>` to build a contact sheet (render it to `references/icons/sheet.svg`). The source is the Excalidraw+ icon scene `2iWPETFJuU0`; to refresh the library, fetch that scene with the API (`GET /api/v1/scenes/2iWPETFJuU0/content`) and run `python3 scripts/extract_icons.py scene.json`.
