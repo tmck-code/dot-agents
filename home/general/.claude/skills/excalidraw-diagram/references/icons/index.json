@@ -1,0 +1,338 @@
+{
+ "aws-ecs": {
+  "width": 149,
+  "height": 147,
+  "tags": "aws ecs container service orange tile",
+  "elements": 4,
+  "image": false
+ },
+ "aws-s3": {
+  "width": 244,
+  "height": 243,
+  "tags": "aws s3 bucket storage green tile",
+  "elements": 7,
+  "image": false
+ },
+ "dial-1": {
+  "width": 134,
+  "height": 134,
+  "tags": "rotary dial gauge knob position 1 of 5 low",
+  "elements": 4,
+  "image": false
+ },
+ "dial-2": {
+  "width": 134,
+  "height": 134,
+  "tags": "rotary dial gauge knob position 2 of 5",
+  "elements": 4,
+  "image": false
+ },
+ "dial-3": {
+  "width": 134,
+  "height": 134,
+  "tags": "rotary dial gauge knob position 3 of 5 mid",
+  "elements": 4,
+  "image": false
+ },
+ "dial-4": {
+  "width": 134,
+  "height": 134,
+  "tags": "rotary dial gauge knob position 4 of 5",
+  "elements": 4,
+  "image": false
+ },
+ "dial-5": {
+  "width": 134,
+  "height": 134,
+  "tags": "rotary dial gauge knob position 5 of 5 high",
+  "elements": 4,
+  "image": false
+ },
+ "alert-exclamation": {
+  "width": 92,
+  "height": 105,
+  "tags": "yellow square red exclamation warning",
+  "elements": 3,
+  "image": false
+ },
+ "alert-cross": {
+  "width": 96,
+  "height": 91,
+  "tags": "yellow square red cross error fail",
+  "elements": 2,
+  "image": false
+ },
+ "alert-question": {
+  "width": 92,
+  "height": 107,
+  "tags": "yellow square red question unknown",
+  "elements": 3,
+  "image": false
+ },
+ "alert-check": {
+  "width": 100,
+  "height": 90,
+  "tags": "yellow square green tick success",
+  "elements": 2,
+  "image": false
+ },
+ "databricks": {
+  "width": 183,
+  "height": 183,
+  "tags": "databricks logo circle",
+  "elements": 2,
+  "image": false
+ },
+ "buildkite": {
+  "width": 274,
+  "height": 183,
+  "tags": "buildkite ci logo green",
+  "elements": 1,
+  "image": true
+ },
+ "docker": {
+  "width": 182,
+  "height": 182,
+  "tags": "docker whale logo labelled",
+  "elements": 2,
+  "image": true
+ },
+ "postgresql": {
+  "width": 182,
+  "height": 182,
+  "tags": "postgres postgresql elephant line drawing",
+  "elements": 8,
+  "image": false
+ },
+ "github": {
+  "width": 163,
+  "height": 163,
+  "tags": "github octocat logo black",
+  "elements": 1,
+  "image": true
+ },
+ "github-dashboard": {
+  "width": 183,
+  "height": 183,
+  "tags": "github dashboard teal circle tile",
+  "elements": 4,
+  "image": true
+ },
+ "elasticsearch": {
+  "width": 182,
+  "height": 182,
+  "tags": "elastic elasticsearch logo circle",
+  "elements": 9,
+  "image": false
+ },
+ "delta-lake": {
+  "width": 182,
+  "height": 182,
+  "tags": "delta lake triangle logo blue",
+  "elements": 2,
+  "image": false
+ },
+ "database": {
+  "width": 147,
+  "height": 183,
+  "tags": "database cylinder generic store",
+  "elements": 7,
+  "image": false
+ },
+ "json": {
+  "width": 183,
+  "height": 183,
+  "tags": "json braces black tile code",
+  "elements": 2,
+  "image": false
+ },
+ "person-lanyard": {
+  "width": 71,
+  "height": 154,
+  "tags": "stick figure person badge lanyard user",
+  "elements": 9,
+  "image": false
+ },
+ "person-hat": {
+  "width": 82,
+  "height": 163,
+  "tags": "stick figure person hat user",
+  "elements": 8,
+  "image": false
+ },
+ "person-cap": {
+  "width": 94,
+  "height": 233,
+  "tags": "stick figure propeller cap smiling face filled",
+  "elements": 9,
+  "image": false
+ },
+ "person-cap-outline": {
+  "width": 91,
+  "height": 227,
+  "tags": "stick figure propeller cap smiling face outline",
+  "elements": 9,
+  "image": false
+ },
+ "tmck-code": {
+  "width": 240,
+  "height": 240,
+  "tags": "robot knight tmck-code personal avatar author self",
+  "elements": 1,
+  "image": true
+ },
+ "tmck-code-circle": {
+  "width": 300,
+  "height": 300,
+  "tags": "robot knight tmck-code personal avatar green circle",
+  "elements": 1,
+  "image": true
+ },
+ "tmck-code-square": {
+  "width": 300,
+  "height": 300,
+  "tags": "robot knight tmck-code personal avatar green square",
+  "elements": 1,
+  "image": true
+ },
+ "emoji-crying": {
+  "width": 201,
+  "height": 212,
+  "tags": "emoji crying sad tears",
+  "elements": 5,
+  "image": false
+ },
+ "emoji-shocked": {
+  "width": 213,
+  "height": 212,
+  "tags": "emoji shocked surprised tears",
+  "elements": 10,
+  "image": false
+ },
+ "emoji-shocked-red": {
+  "width": 213,
+  "height": 212,
+  "tags": "emoji shocked red eyes panic",
+  "elements": 13,
+  "image": false
+ },
+ "cloud": {
+  "width": 221,
+  "height": 154,
+  "tags": "cloud outline black internet",
+  "elements": 9,
+  "image": false
+ },
+ "cpu": {
+  "width": 80,
+  "height": 95,
+  "tags": "cpu chip processor compute",
+  "elements": 14,
+  "image": false
+ },
+ "status-check": {
+  "width": 140,
+  "height": 142,
+  "tags": "green circle tick ok pass",
+  "elements": 3,
+  "image": false
+ },
+ "status-cross": {
+  "width": 137,
+  "height": 140,
+  "tags": "red circle cross fail error",
+  "elements": 3,
+  "image": false
+ },
+ "status-info": {
+  "width": 142,
+  "height": 142,
+  "tags": "blue circle i info",
+  "elements": 4,
+  "image": false
+ },
+ "status-warning": {
+  "width": 172,
+  "height": 139,
+  "tags": "yellow triangle exclamation warning",
+  "elements": 4,
+  "image": false
+ },
+ "status-question": {
+  "width": 134,
+  "height": 134,
+  "tags": "purple circle question unknown",
+  "elements": 3,
+  "image": false
+ },
+ "phone": {
+  "width": 143,
+  "height": 229,
+  "tags": "mobile phone device",
+  "elements": 3,
+  "image": false
+ },
+ "laptop": {
+  "width": 366,
+  "height": 249,
+  "tags": "laptop computer device",
+  "elements": 5,
+  "image": false
+ },
+ "toggle-on": {
+  "width": 127,
+  "height": 63,
+  "tags": "toggle switch on blue",
+  "elements": 2,
+  "image": false
+ },
+ "toggle-off": {
+  "width": 127,
+  "height": 63,
+  "tags": "toggle switch off green",
+  "elements": 2,
+  "image": false
+ },
+ "switch-on": {
+  "width": 160,
+  "height": 63,
+  "tags": "pill switch on black labelled",
+  "elements": 3,
+  "image": false
+ },
+ "switch-off": {
+  "width": 160,
+  "height": 66,
+  "tags": "pill switch off grey labelled",
+  "elements": 3,
+  "image": false
+ },
+ "switch-on-square": {
+  "width": 160,
+  "height": 57,
+  "tags": "square switch on black labelled",
+  "elements": 3,
+  "image": false
+ },
+ "switch-off-square": {
+  "width": 160,
+  "height": 57,
+  "tags": "square switch off grey labelled",
+  "elements": 3,
+  "image": false
+ },
+ "check-filled": {
+  "width": 93,
+  "height": 93,
+  "tags": "black filled circle tick done",
+  "elements": 2,
+  "image": false
+ },
+ "cross-outline": {
+  "width": 93,
+  "height": 93,
+  "tags": "black outline circle cross closed",
+  "elements": 3,
+  "image": false
+ }
+}
