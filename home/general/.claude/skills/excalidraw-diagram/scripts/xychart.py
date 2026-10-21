@@ -227,21 +227,21 @@ def _line(points, color, width=1, dashed=False, fill='transparent'):
         strokeWidth=width, strokeStyle='dashed' if dashed else 'solid',
         points=rel, lastCommittedPoint=None, startBinding=None,
         endBinding=None, startArrowhead=None, endArrowhead=None,
-        polygon=False, boundElements=None,
+        polygon=False, boundElements=None, customData={'shadow': False},
     )
 
 
 def _rect(x, y, w, h, fill, stroke):
     return _base(new_id(), 'rectangle', x, y, w, h, [],
                  strokeColor=stroke, backgroundColor=fill, fillStyle='solid',
-                 strokeWidth=1)
+                 strokeWidth=1, customData={'shadow': False})
 
 
 def _dot(cx, cy, fill, stroke):
     return _base(new_id(), 'ellipse', cx - MARKER_R, cy - MARKER_R,
                  2 * MARKER_R, 2 * MARKER_R, [],
                  strokeColor=stroke, backgroundColor=fill, fillStyle='solid',
-                 strokeWidth=1)
+                 strokeWidth=1, customData={'shadow': False})
 
 
 def convert_xychart(mermaid_text, legend_names=None):
@@ -371,8 +371,14 @@ def convert_xychart(mermaid_text, legend_names=None):
                 if show_values:
                     label = value_labels[s_idx][i]
                     w = len(label) * VALUE_FONT * CHAR_W
-                    els.append(_text(label, c0 + bar_w / 2 - w / 2,
-                                     y1 - VALUE_LABEL_GAP - VALUE_FONT * LINE_H,
+                    ly = y1 - VALUE_LABEL_GAP - VALUE_FONT * LINE_H
+                    lh = VALUE_FONT * LINE_H
+                    # opaque backing so a dashed gridline never strikes the label
+                    bk = _rect(c0 + bar_w / 2 - w / 2 - 3, ly, w + 6, lh,
+                               '#ffffff', 'transparent')
+                    bk['strokeWidth'] = 0
+                    els.append(bk)
+                    els.append(_text(label, c0 + bar_w / 2 - w / 2, ly,
                                      w, VALUE_FONT, 'center'))
         bar_idx += 1
 

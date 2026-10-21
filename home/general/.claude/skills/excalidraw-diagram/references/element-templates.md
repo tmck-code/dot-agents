@@ -301,3 +301,63 @@ The renderer hides the arrow line only inside the label's declared box. If the b
   "lineHeight": 1.25
 }
 ```
+
+## Shadow
+
+A shadow is a copy of its node, offset +6/+6. It has no text and no bindings. Put it just before its node in `elements`, with a lower `index`. Fill and stroke are the node's stroke color. `scripts/shadow.py` adds these for you. Set `customData.shadow: false` on a node to opt out.
+
+```json
+[
+  {
+    "type": "rectangle",
+    "id": "node1-shadow",
+    "index": "a0",
+    "x": 106, "y": 106,
+    "width": 180, "height": 80,
+    "strokeColor": "#1971c2",
+    "backgroundColor": "#1971c2",
+    "fillStyle": "solid",
+    "strokeWidth": 1,
+    "strokeStyle": "solid",
+    "roughness": 0,
+    "opacity": 80,
+    "angle": 0,
+    "roundness": {"type": 3},
+    "seed": 11111,
+    "version": 1,
+    "versionNonce": 22222,
+    "isDeleted": false,
+    "groupIds": [],
+    "boundElements": null,
+    "link": null,
+    "locked": false,
+    "customData": {"shadowOf": "node1"}
+  },
+  {
+    "type": "rectangle",
+    "id": "node1",
+    "index": "a1",
+    "x": 100, "y": 100,
+    "width": 180, "height": 80,
+    "strokeColor": "#1971c2",
+    "backgroundColor": "#d0ebff",
+    "fillStyle": "solid",
+    "strokeWidth": 2,
+    "strokeStyle": "solid",
+    "roughness": 0,
+    "opacity": 100,
+    "angle": 0,
+    "roundness": {"type": 3},
+    "seed": 33333,
+    "version": 1,
+    "versionNonce": 44444,
+    "isDeleted": false,
+    "groupIds": [],
+    "boundElements": [{"type": "text", "id": "node1-text"}],
+    "link": null,
+    "locked": false
+  }
+]
+```
+
+The text element `node1-text` (not shown) has `containerId: "node1"`.

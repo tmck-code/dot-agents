@@ -12,6 +12,7 @@ labels under the bottom band and a hand-drawn (roughness 2) title pill above.
 import re
 
 from convert import _base, new_id  # noqa: E402  (sibling module)
+from shadow import add_shadows  # noqa: E402
 
 GANTT_FONT_FAMILY = 8          # Comic Shanns, as in the reference bars
 GANTT_TITLE_FONT_FAMILY = 5    # Excalifont, as in the reference title
@@ -23,7 +24,7 @@ GANTT_LABEL_COL_W = 150.0      # section-label column left of the axis origin
 GANTT_LABEL_PAD_X = 18.0
 GANTT_BAR_FONT = 18.18
 GANTT_SIDE_FONT = 13.85        # label placed beside a too-narrow bar
-GANTT_SIDE_GAP_X = 6.0         # gap between bar end and its side label
+GANTT_SIDE_GAP_X = 10.0         # gap between bar end and its side label
 GANTT_TICK_FONT = 16.62
 GANTT_SECTION_FONT = 25.82
 GANTT_TITLE_FONT = 25.82
@@ -45,6 +46,17 @@ GANTT_PALETTE = [
     ("#dbe4ff", "#4263eb", "#edf2ff"),
 ]
 
+# status tag -> (legend label, fill, stroke); reuses the palette colours
+GANTT_STATUS = {
+    "done": ("Done", "#d3f9d8", "#2f9e44"),
+    "active": ("Active", "#d0ebff", "#1971c2"),
+    "crit": ("Critical", "#ffe3e3", "#e03131"),
+    "milestone": ("Milestone", "#ffec99", "#f08c00"),
+}
+GANTT_LEGEND_SWATCH = (26, 20)
+GANTT_LEGEND_FONT = 16.62
+GANTT_LEGEND_GAP_Y = 14.0
+
 TASK_RE = re.compile(r'^(.*?)\s*:\s*(.+)$')
 NUM_RE = re.compile(r'^-?\d+(?:\.\d+)?$')
 
@@ -58,7 +70,8 @@ def _parse_task(name, spec, prev_end, ids):
     (`5s`, `2d`; the unit itself is ignored).
     """
     parts = [p.strip() for p in spec.split(",")]
-    parts = [p for p in parts if p not in ("done", "active", "crit", "milestone")]
+    status = next((p for p in parts if p in GANTT_STATUS), None)
+    parts = [p for p in parts if p not in GANTT_STATUS]
     task_id = None
     if len(parts) > 1 and not NUM_RE.match(parts[0]) and not parts[0].startswith("after "):
         task_id = parts.pop(0)
@@ -75,13 +88,13 @@ def _parse_task(name, spec, prev_end, ids):
     end = end_num if NUM_RE.match(end_spec) else start + end_num
     if task_id:
         ids[task_id] = end
-    return name, start, end
+    return name, start, end, status
 
 
 def parse_gantt(text):
     title = None
     axis_format = "%S"
-    sections = []  # [(name, [(task, start, end), ...])]
+    sections = []  # [(name, [(task, start, end, status), ...])]
     ids = {}
     prev_end = 0.0
     for raw in text.splitlines():
@@ -152,8 +165,8 @@ def convert_gantt(mermaid_text):
     tasks = [t for _, ts in sections for t in ts]
     if not tasks:
         raise ValueError("gantt has no tasks")
-    t_min = min(s for _, s, _ in tasks)
-    t_max = max(e for _, _, e in tasks)
+    t_min = min(t[1] for t in tasks)
+    t_max = max(t[2] for t in tasks)
     n_units = max(1, int(t_max - t_min + 0.999))
     x0, y0 = 604.0, 1796.0
     band_x = x0 - GANTT_LABEL_COL_W
@@ -163,7 +176,7 @@ def convert_gantt(mermaid_text):
     bands, bars, side_labels, section_labels = [], [], [], []
     y = y0
     for idx, (name, ts) in enumerate(sections):
-        bar_fill, bar_stroke, tint = GANTT_PALETTE[idx % len(GANTT_PALETTE)]
+        sec_fill, sec_stroke, tint = GANTT_PALETTE[idx % len(GANTT_PALETTE)]
         band_h = 2 * GANTT_BAND_PAD_Y + max(len(ts), 1) * GANTT_ROW_STRIDE
         bands.append(_base(new_id(), "rectangle", band_x, y, band_w, band_h, [],
                            strokeColor=GANTT_GRID, backgroundColor=tint))
@@ -177,13 +190,17 @@ def convert_gantt(mermaid_text):
                 "center", [], family=GANTT_TITLE_FONT_FAMILY,
                 color=GANTT_FILL_TEXT))
         ry = y + GANTT_BAND_PAD_Y
-        for task, start, end in ts:
+        for task, start, end, status in ts:
             gid = [new_id()]
+            bar_fill, bar_stroke = sec_fill, sec_stroke
+            if status:
+                bar_fill, bar_stroke = GANTT_STATUS[status][1:]
             bx, bw = tx(start), max(end - start, 0.05) * GANTT_UNIT_W
             bars.append(_base(new_id(), "rectangle", bx, ry, bw, GANTT_BAR_H, gid,
                               strokeColor=bar_stroke, backgroundColor=bar_fill,
                               strokeWidth=2,
-                              roundness={"type": 3}))
+                              roundness={"type": 3},
+                              customData={"shadow": True}))
             text_w = len(task) * GANTT_BAR_FONT * GANTT_CHAR_W
             if text_w + 16 <= bw:
                 bars.append(_text(task, bx + (bw - text_w) / 2, ry + 4, text_w,
@@ -193,10 +210,11 @@ def convert_gantt(mermaid_text):
                 # left-aligned so the text hugs the bar regardless of how far
                 # the width heuristic overshoots the real glyph widths
                 sw = len(task) * GANTT_SIDE_FONT * GANTT_CHAR_W + 4
-                sx, sy = bx + bw + GANTT_SIDE_GAP_X, ry + 5
+                sx, sy = bx + bw + GANTT_SIDE_GAP_X, ry + (GANTT_BAR_H - 19) / 2
                 side_labels.append(_base(new_id(), "rectangle", sx - 2, sy, sw, 19, [],
                                          strokeColor="transparent",
-                                         backgroundColor=tint))
+                                         backgroundColor=tint,
+                                         customData={"shadow": False}))
                 side_labels.append(_text(task, sx, sy + 1, sw, GANTT_SIDE_FONT,
                                          "left", gid, color=GANTT_FILL_TEXT))
             ry += GANTT_ROW_STRIDE
@@ -226,10 +244,28 @@ def convert_gantt(mermaid_text):
         title_els.append(_base(new_id(), "rectangle", px, py, pill_w, GANTT_TITLE_H, [],
                                strokeColor="transparent",
                                backgroundColor=GANTT_PALETTE[0][0],
-                               roughness=2, roundness={"type": 3}))
+                               roughness=2, roundness={"type": 3},
+                               customData={"shadow": False}))
         title_els.append(_text(title, px + GANTT_TITLE_PAD_X, py + 10, tw,
                                GANTT_TITLE_FONT, "center", [],
                                family=GANTT_TITLE_FONT_FAMILY, color=GANTT_FILL_TEXT))
 
-    # draw order: bands, grid, bars (+ inside labels), side labels, ticks, sections, title
-    return bands + grid + bars + side_labels + ticks + section_labels + title_els
+    # status legend below the tick labels, only for statuses used in the input
+    legend = []
+    used = [k for k in GANTT_STATUS if any(t[3] == k for t in tasks)]
+    lx, ly = band_x, y_end + GANTT_TICK_FONT * 1.25 + GANTT_LEGEND_GAP_Y
+    for key in used:
+        label, fill, stroke = GANTT_STATUS[key]
+        legend.append(_base(new_id(), "rectangle", lx, ly, *GANTT_LEGEND_SWATCH, [],
+                            strokeColor=stroke, backgroundColor=fill,
+                            strokeWidth=2, roundness={"type": 3},
+                            customData={"shadow": False}))
+        tw = len(label) * GANTT_LEGEND_FONT * GANTT_CHAR_W
+        legend.append(_text(label, lx + GANTT_LEGEND_SWATCH[0] + 8, ly, tw,
+                            GANTT_LEGEND_FONT, "left", [], color=GANTT_FILL_TEXT))
+        lx += GANTT_LEGEND_SWATCH[0] + 8 + tw + 24
+
+    # draw order: bands, grid, bars (+ inside labels), side labels, ticks, sections, title, legend
+    return add_shadows(bands + grid + bars + side_labels + ticks + section_labels
+                       + title_els + legend,
+                       offset=6, opacity=80)

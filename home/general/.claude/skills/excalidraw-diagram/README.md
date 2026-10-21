@@ -49,8 +49,13 @@ The generator scripts can also be run directly:
 
 ```bash
 python3 scripts/convert.py diagram.mmd diagram.excalidraw        # Mermaid to Excalidraw
-python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]
+python3 scripts/convert.py diagram.mmd diagram.excalidraw --format min          # ER: "full" (default) or "min" (no examples or group containers)
+python3 scripts/convert.py diagram.mmd diagram.excalidraw --no-examples       # ER: ignore "%% example" rows (kept; "min" covers it)
+python3 -I scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]
+python3 scripts/xychart.py ... --legend "Signups,Churn"                    # series names
 ```
+
+Examples: `example-flowchart`, `example-sequence`, `example-erd`, `example-erd-min`, `example-gantt`, `example-pie`, `example-xychart`.
 
 ## Customize Colors
 
