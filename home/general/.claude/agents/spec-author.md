@@ -62,10 +62,17 @@ more accurate than you grepping cold. Before you do your own reading:
 4. **Wait for every spawned research agent to return before doing any
    research of your own.** No parallel self-exploration while they run —
    duplicated reading wastes tokens and the reports may make it moot. Once
-   all reports are read, fill only the gaps they left (including areas with
-   no matching domain agent, which you then read yourself as before). If a
-   spawned agent fails or returns without a report, treat its area as a gap
-   and read it yourself — don't re-spawn into a known-broken session.
+   all reports are read, fill only the gaps they left. If a spawned agent
+   fails or returns without a report, treat its area as a gap — don't
+   re-spawn into a known-broken session.
+5. **Gaps go to `Explore`.** For every area with no domain agent (or whose
+   agent failed), spawn `Explore` to produce an **address map**: one line per
+   item, `path:line`, symbol, one-line purpose, covering the modules the
+   change touches and their tests. No code bodies. Same report convention as
+   step 3. Spawn one `Explore` per independent area, in one message, after
+   the domain agents have returned. Work from the map; open a source range
+   yourself only where the map leaves a decision (an invariant, a signature,
+   a config precedence) unresolved, and then only that range.
 
 This only covers research grounding — you still write every artifact
 yourself; domain agents never author spec files.
@@ -106,17 +113,17 @@ re-read. If you read a file whole, don't later re-read slices of it.
    destination. Treat `context` / `rules` as **constraints on you** — never copy
    those blocks into the artifact. Read every completed dependency artifact for
    context before writing the next.
-3. **Ground every claim in the code.** Before writing `design.md`/`tasks.md`, grep
-   and read the real modules the change touches and their tests (or use the
-   reports from the domain agents you spawned — see "Delegate research to
-   domain agents" above). Name actual files, functions, and fields. A task
+3. **Ground every claim in the code.** Before writing `design.md`/`tasks.md`, work
+   from the domain-agent reports and `Explore` address maps (see "Delegate
+   research to domain agents" above), opening source ranges only to settle
+   what they leave open. Name actual files, functions, and fields. A task
    that says "update the parser" without the file and function name is not
    done. Honour the repo's documented invariants when you reference them.
 
    This discovery is the token-heavy, parallelizable part of the job — the artifact
    writes afterward are not, since each depends on decisions in the last one, so
-   keep those serial. Parallelise it two ways: fork independent domain agents in a
-   single message, and for any area you read yourself, batch the Grep/Read/Glob
+   keep those serial. Parallelise it two ways: fork independent domain agents (then
+   `Explore` for the gaps) in a single message, and for any range you read yourself, batch the Grep/Read/Glob
    lookups for multiple independent modules or test files into a single message
    with multiple tool calls instead of doing them one at a time.
 4. **Loop until apply-ready.** After each artifact, re-run `openspec status
