@@ -1,7 +1,7 @@
 ---
 description: Write a session handoff onto this branch's scratch shelf for the next session.
-argument-hint: What the next session will focus on
-disable-model-invocation: true
+argument-hint: What the next session will focus on (default: for the next session to continue)
+disable-model-invocation: false
 allowed-tools: Bash("${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/dewey-decimal/shelf.sh":*)
 ---
 
@@ -33,5 +33,7 @@ Follow the `handoff` skill below for the content. The path above replaces its sa
 !`awk 'n >= 2; /^---$/ { n++ }' ~/.agents/skills/handoff/SKILL.md`
 
 Focus for the next session: $ARGUMENTS
+
+When that line carries no text after the colon, the focus is: for the next session to continue. Write the handoff for continuing the current task from where it stands.
 
 Done when the document exists at the path and you have told the user that path.
