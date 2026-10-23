@@ -30,7 +30,7 @@ If the work lives in a linked worktree that is not this session's checkout:
 
 Follow the `handoff` skill below for the content. The path above replaces its save location.
 
-!`awk 'n >= 2; /^---$/ { n++ }' ~/.agents/skills/handoff/SKILL.md`
+!`awk 'n >= 2; /^---$/ { n++ }' "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/handoff/SKILL.md"`
 
 Focus for the next session: $ARGUMENTS
 

@@ -221,3 +221,6 @@ __marimo__/
 
 # agent scratch shelves (dewey-decimal)
 .scratch/
+
+# agent-graph output
+/agent-graph.html

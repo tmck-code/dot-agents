@@ -75,14 +75,14 @@ job).
    the parent model and ignores `model` overrides. Each subagent gets, in its prompt: the exact tasks it owns (with the
    file/line/function detail from `tasks.md`), the relevant context/invariants, the
    code-style rule, the instruction to run its task's targeted gate, the instruction
-   to **tick its own subtasks the moment each is done** (see below), and the no-poll
-   rule (see "Waiting is free — never poll"). Give no report path (see
-   "Reporting").
+   to **tick its own subtasks the moment each is done** (see below), the no-poll
+   rule (see "Waiting is free — never poll"), and the report-file path you created
+   for it (see "Reporting").
 
 3. **Follow-ups go to a new worker.** Never `SendMessage` a finished child: each
    resume reloads its whole context. Start a new `worker` whose brief points at
-   the previous child's report file (the path the hooks announced) and at the
-   files on disk.
+   the previous child's report file (the one you created) and at the files on
+   disk.
 
 4. **Avoid checklist collisions.** Parallel subagents must own **disjoint** sets of
    `tasks.md` lines so their ticks never race. If two tasks would touch the same
@@ -134,14 +134,19 @@ reading its report file. This rule goes **verbatim into every child brief**
 
 ## Reporting
 
-Follow the global rule: a child's final message is its report, and briefs name
-no report path. The user's hooks save each final message to disk and announce
-the file path on your next `Agent`/`SendMessage` call. Do not trust the returned
-message; it is truncated. Tell each child to make its final message cover: tasks
-done, gate result, files touched, anything it paused on. After each completion
-notification, read that child's announced report file **once**. Start wave N+1
-only in the turn where the **last** wave-N notification arrives. Never check for
-stragglers on a timer.
+**You create each child's report file before spawning it.** Put it on the shelf as
+`.scratch/<shelf>/<agent>-<task>-<slug>.md`; create the file, then give that exact
+path in the brief. Tell the child to write its findings there and return the path.
+Read that file **once** after its completion notification; do not trust the
+returned message, which is truncated.
+
+The `SubagentStop` capture hook is a fallback for a child that writes nothing: it
+saves the final message and the announce hook reports the path. Prefer the file
+you created. Tell each child to make its final message cover: tasks done, gate
+result, files touched, anything it paused on.
+
+Start wave N+1 only in the turn where the **last** wave-N notification arrives.
+Never check for stragglers on a timer.
 
 ## Ticking subtasks — as soon as they're done
 
@@ -187,8 +192,9 @@ then confirm with that single gate, not a second full sweep.
 
 ## Reporting back
 
-Same rule upward: your final message is your report (the hooks save it). Write
-no report file. Report concisely, never raw file or test dumps:
+Write your full report to the report-file path your parent created and gave you,
+then return that path. If no path was given, make your final message the report.
+Never paste raw file or test dumps. Cover:
 - tasks completed (N/M) and any left unticked + why,
 - how you fanned out (waves / which tasks ran in parallel vs sequence),
 - before/after test pass counts,

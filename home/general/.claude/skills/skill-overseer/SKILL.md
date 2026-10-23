@@ -42,7 +42,7 @@ current session's transcript. Each command auto-detects the session and project.
    until the harness reloads. If it isn't callable yet, just **read its
    `SKILL.md` off disk and follow it directly** — that always works:
    ```bash
-   cat "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/docker-fastapi/SKILL.md"   # or ~/.agents/skills/...
+   cat "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/docker-fastapi/SKILL.md"
    ```
 
 5. **Release** when the task is done (disables it unless another live session

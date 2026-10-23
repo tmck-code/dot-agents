@@ -5,16 +5,11 @@
   },
   "permissions": {
     "deny": [
-      "Artifact",
       "AskUserQuestion",
       "DesignSync",
       "EndConversation",
       "EnterPlanMode",
-      "EnterWorktree",
-      "ExitPlanMode",
-      "ExitWorktree",
-      "PushNotification",
-      "Workflow"
+      "ExitPlanMode"
     ]
   },
   "model": "opus[1m]",
@@ -27,7 +22,25 @@
         "hooks": [
           {
             "type": "command",
-            "command": "echo \"$CLAUDE_TOOL_INPUT\" | grep -Eq '(npm|pnpm|yarn) (i|install|add)' && { echo 'BLOCKED: package install requires explicit human approval'; exit 2; }; exit 0"
+            "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/ban-host-npm.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/no-long-sleep.py\""
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/subagent-git-tree-guard.py\""
           }
         ]
       },
@@ -85,7 +98,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/yet-another-statusline/yas/0.4.8/.python/cpython-3.15-macos-aarch64-none/bin/python3.13\" \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/yet-another-statusline/yas/0.4.8/hooks/yas-prompt-hook.py\""
+            "command": "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/yas.sh\" prompt"
           }
         ]
       }
@@ -99,6 +112,15 @@
             "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/subagent-report-capture.py\""
           }
         ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/handoff-nudge.py\""
+          }
+        ]
       }
     ],
     "Notification": [
@@ -107,7 +129,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "osascript -e 'display notification \"Claude Code finished!\" with title \"Claude Code\"'"
+            "command": "osascript -e 'display notification \"Claude Code needs attention\" with title \"Claude Code\"'"
           }
         ]
       }
@@ -118,30 +140,45 @@
         "hooks": [
           {
             "type": "command",
-            "command": "osascript -e 'display notification \"Claude Code stopped!\" with title \"Claude Code\"'"
+            "command": "osascript -e 'display notification \"Claude Code stopped\" with title \"Claude Code\"'"
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "osascript -e 'display notification \"Claude Code stopped with an error\" with title \"Claude Code\"'"
           }
         ]
       }
     ]
   },
-  "disableRemoteControl": true,
-  "disableWorkflows": true,
+  "disableRemoteControl": false,
   "disableArtifact": true,
   "statusLine": {
     "type": "command",
-    "command": "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/yet-another-statusline/yas/0.4.8/.python/cpython-3.13-macos-aarch64-none/bin/python3.13\" \"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/cache/yet-another-statusline/yas/0.4.8/claude/statusline_command.py\"",
+    "command": "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/yas.sh\" statusline",
     "padding": 1,
     "refreshInterval": 1
   },
   "enabledPlugins": {
     "skill-creator@claude-plugins-official": false,
     "frontend-design@claude-plugins-official": false,
+    "superpowers@claude-plugins-official": false,
     "feature-dev@claude-plugins-official": false,
     "claude-code-setup@claude-plugins-official": false,
     "playground@claude-plugins-official": false,
     "hookify@claude-plugins-official": false,
+    "huggingface-skills@claude-plugins-official": false,
     "linear@claude-plugins-official": false,
+    "chrome-devtools-mcp@claude-plugins-official": false,
+    "mintlify@claude-plugins-official": false,
     "playwright@claude-plugins-official": false,
+    "exa@claude-plugins-official": false,
     "code-simplifier@claude-plugins-official": false,
     "pyright-lsp@claude-plugins-official": false,
     "plugin-dev@claude-plugins-official": false,

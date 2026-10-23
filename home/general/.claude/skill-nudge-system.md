@@ -142,6 +142,8 @@ flowchart LR
 | skill | fires on |
 |---|---|
 | `grill-me` | "grill me", "stress-test my/the plan/design", "get grilled" |
+| `docker-fastapi` | docker / image size / build speed / layer cache / multi-stage, for a Python or FastAPI service |
+| `docker-web-ui` | the same docker triggers, for a frontend or Vite app |
 
 **Current audiovis table** (`<repo>/.claude/skill-routing.json`):
 
@@ -233,51 +235,6 @@ Prompt `"grill me"` in a project where `skillOverrides: {"grill-me": "off"}`:
 
 ---
 
-## How this was built — the subagent delegation flow
-
-The implementation followed the repo's coordinator/worker discipline: the main thread
-**routed**, subagents **wrote**. Two sequential delegations, each the sole writer of its
-files, each reporting through a scratchpad file (not its return message).
-
-```mermaid
-flowchart TD
-    subgraph Coordinator [Main thread — coordinator]
-        P1[Design the system] --> D1
-        D1{Delegate build #1} --> R1[Read report file]
-        R1 --> P2[User picks tighter overseer integration]
-        P2 --> D2{Delegate build #2}
-        D2 --> R2[Read report file]
-        R2 --> P3[Summarise to user]
-    end
-
-    D1 -. spawns .-> A1
-    D2 -. spawns .-> A2
-
-    subgraph Build1 [Subagent: build skill-nudge hook]
-        A1[Sole writer of:<br/>skill-nudge.py + 2 routing tables<br/>+ settings.json wiring] --> V1[Self-verify: 4 functional tests]
-        V1 --> W1[Write report → scratchpad/skill-nudge-impl.md]
-    end
-
-    subgraph Build2 [Subagent: add overseer awareness]
-        A2[Sole writer of:<br/>skill-nudge.py only] --> V2[Self-verify: 5 tests incl. disabled path]
-        V2 --> W2[Write report → scratchpad/skill-nudge-overseer.md]
-    end
-```
-
-Conventions applied (from the global working agreement):
-
-- **Report-through-file:** each subagent wrote its full findings to a uniquely-named
-  scratchpad markdown file and returned only the path; the coordinator read the file
-  rather than trusting the return text.
-- **Sole-writer boundary:** each subagent was told it was the only writer of its files
-  and must not fork a child editing the same file. Build #2 edited *only*
-  `skill-nudge.py`, leaving the routing tables and settings from Build #1 untouched.
-- **Self-verification before return:** subagents ran their own tests (py_compile, JSON
-  parse, piped sample payloads) and captured outputs verbatim; the coordinator reviewed
-  verdicts, not raw test noise.
-
----
-
 ## Extending the system
 
 - **Add a generic skill** → append a rule to `$CLAUDE_CONFIG_DIR/skill-routing.json`. It fires in
@@ -301,7 +258,7 @@ Conventions applied (from the global working agreement):
 ```bash
 # both audiovis skills (project table + global)
 echo '{"prompt":"at 1:34 the glow has too much colour, logs in ./logs/"}' \
-  | CLAUDE_PROJECT_DIR=/home/freman/dev/audiovis python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/skill-nudge.py"
+  | CLAUDE_PROJECT_DIR=/path/to/audiovis python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/skill-nudge.py"
 
 # global-only generic skill
 echo '{"prompt":"grill me on this plan"}' | python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/skill-nudge.py"

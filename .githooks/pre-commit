@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Fail the commit if home/{linux,osx}/.claude/settings.json have drifted apart,
-# ignoring keys that are deliberately per-machine or OS-specific.
+# Repository guards:
+#   1. Fail if home/{linux,osx}/.claude/settings.json have drifted apart, ignoring
+#      keys that are deliberately per-machine or OS-specific.
+#   2. Fail if a file that belongs in home/general/ reappears under home/linux/
+#      or home/osx/ (one shared copy, no per-OS forks).
 # Bypass with: SKIP_SETTINGS_DRIFT=1 git commit ...
 set -euo pipefail
 
@@ -10,17 +13,49 @@ repo_root=$(git rev-parse --show-toplevel)
 linux="$repo_root/home/linux/.claude/settings.json"
 osx="$repo_root/home/osx/.claude/settings.json"
 
+# --- 2. shared files must not be duplicated per OS ---------------------------------
+shared=(
+  "home/linux/.claude/CLAUDE.md"
+  "home/osx/.claude/CLAUDE.md"
+  "home/linux/.claude/delegate-routing.json"
+  "home/osx/.claude/delegate-routing.json"
+  "home/linux/.claude/skill-routing.json"
+  "home/osx/.claude/skill-routing.json"
+  "home/linux/.claude/skill-nudge-system.md"
+  "home/osx/.claude/skill-nudge-system.md"
+  "home/linux/.claude/scripts/gate.sh"
+  "home/osx/.claude/scripts/gate.sh"
+  "home/linux/.claude/scripts/yas.sh"
+  "home/osx/.claude/scripts/yas.sh"
+  "home/linux/.claude/hooks/subagent-git-tree-guard.py"
+  "home/osx/.claude/hooks/subagent-git-tree-guard.py"
+)
+bad=()
+for path in "${shared[@]}"; do
+  [[ -e "$repo_root/$path" ]] && bad+=("$path")
+done
+for dir in home/linux/.claude/agents home/osx/.claude/agents; do
+  [[ -d "$repo_root/$dir" ]] && bad+=("$dir/")
+done
+if (( ${#bad[@]} )); then
+  echo "pre-commit: shared config must live only under home/general/:" >&2
+  printf '  %s\n' "${bad[@]}" >&2
+  exit 1
+fi
+
+# --- 1. settings drift --------------------------------------------------------------
 [[ -f "$linux" && -f "$osx" ]] || exit 0
 command -v jq >/dev/null || { echo "pre-commit: jq not found, skipping settings drift check" >&2; exit 0; }
 
-# Deliberately per-machine: model, remoteControlAtStartup, agentPushNotifEnabled.
-# OS-specific: notification/stop hooks, statusline, and the yas prompt hook
-# (per-OS python build paths). Disabled (false) plugin entries are noise, ignore.
+# Deliberately per-machine: model, remote-control/push toggles.
+# OS-specific: notification, stop and stop-failure hooks; statusline; the YAS
+# prompt hook (resolved per machine by scripts/yas.sh). Disabled plugin entries
+# are noise, ignore.
 normalise() {
   jq --sort-keys '
     del(.model, .remoteControlAtStartup, .agentPushNotifEnabled,
-        .statusLine, .hooks.Notification, .hooks.Stop)
-    | .hooks.UserPromptSubmit |= map(select(all(.hooks[]; .command | contains("yas") | not)))
+        .statusLine, .hooks.Notification, .hooks.Stop, .hooks.StopFailure)
+    | .hooks.UserPromptSubmit |= map(select(all(.hooks[]; .command | contains("yas.sh") | not)))
     | .enabledPlugins |= with_entries(select(.value))
   ' "$1"
 }

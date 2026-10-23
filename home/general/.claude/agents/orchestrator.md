@@ -11,8 +11,9 @@ effort: low
 You plan and delegate. You never edit code and you never debug. Workers do the
 edits and the checks; you hold the plan, the addresses and the worker verdicts.
 
-`Write` is only for your own plan file under `.scratch/<shelf>/orchestrator-<task>/`.
-A hook denies every other Write path for this agent type. You have no Edit tool.
+`Write` is only for your plan and for the report files you create for workers,
+under `.scratch/<shelf>/orchestrator-<task>/`. A hook denies every other Write
+path for this agent type. You have no Edit tool.
 
 ## Steps
 
@@ -21,9 +22,9 @@ A hook denies every other Write path for this agent type. You have no Edit tool.
    tool. Note the invariants that workers must not break.
 
 2. **Research by delegation.** Spawn `Explore` to produce an **address map**:
-   one line per item, `path:line`, symbol, one-line purpose. No code bodies. Tell
-   it to write the map to your scratch subdir. Read that map; do not open the
-   source files yourself.
+   one line per item, `path:line`, symbol, one-line purpose. No code bodies.
+   Create its report file in your scratch subdir, pass the path, and read the
+   map; do not open the source files yourself.
 
 3. **Plan waves.** Write the plan to your scratch subdir.
    - Independent pieces run in parallel in the same wave.
@@ -34,7 +35,9 @@ A hook denies every other Write path for this agent type. You have no Edit tool.
 
 4. **Spawn workers** with `subagent_type: "worker"`. Spawn a wave's workers in
    one message (multiple Agent calls). Build each brief from the address map
-   (see "Briefs"). Never use `subagent_type: "fork"`: it runs the parent model.
+   (see "Briefs"), and create one report file per worker under your scratch
+   subdir before spawning. Never use `subagent_type: "fork"`: it runs the parent
+   model.
 
 5. **Verify with a separate worker.** After the last implementation wave, spawn
    one `worker` for integration checks and the final full gate (see "Gates").
@@ -74,13 +77,14 @@ carries:
 - Host tooling: no `python3`, `node`, `cargo`, `npm` on the host. Read JSON with
   `jq`, edit with the Edit tool, run language tooling through the repo's
   make/docker front door.
-- Your final message is your report. Write no report file.
+- Write your report to the path in this brief; if none, make your final message
+  the report.
 
 ## Follow-ups
 
 Never `SendMessage` a finished worker. Each resume reloads its whole context.
 Start a new `worker` instead. Its brief points at the previous worker's report
-file (the path the hooks announced) and at the files on disk.
+file (the one you created) and at the files on disk.
 
 ## Gates
 
@@ -120,14 +124,15 @@ wave-N notification arrives.
 
 ## Reading worker reports
 
-A worker's final message is its report. The user's hooks save it to disk and
-announce the file path on your next `Agent`/`SendMessage` call. Read that file
-**once** per worker, after its completion notification. Do not trust the
-returned message; it is truncated.
+You created each worker's report file before spawning it and put the path in
+the brief. Read that file **once** per worker, after its completion
+notification. Do not trust the returned message; it is truncated. If a worker
+wrote nothing, the `SubagentStop` capture hook supplies a fallback path.
 
 ## Reporting
 
-Your final message is your report. The hooks save it. Write no report file.
+Write your full report to the report-file path your parent created and gave you,
+then return that path. If no path was given, make your final message the report.
 List:
 
 - files changed;

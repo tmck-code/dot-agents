@@ -1,0 +1,57 @@
+%% Regenerate with:
+%%   python3 -I ../home/general/.claude/skills/excalidraw-diagram/scripts/convert.py \
+%%     hooks-canvas.mmd hooks-canvas.excalidraw
+%% The title and legend are added to the .excalidraw after conversion.
+flowchart LR
+    PROMPT(["User prompt"])
+    UPS["UserPromptSubmit"]
+    PRE["PreToolUse"]
+    POST["PostToolUse"]
+    SUBSTOP["SubagentStop"]
+    NOTIFY["Stop / StopFailure<br/>Notification"]
+
+    PROMPT --> UPS
+    UPS --> SN["skill-nudge.py<br/>prompt -> skill rules"]
+    UPS --> YAS["scripts/yas.sh prompt<br/>record prompt time"]
+    UPS --> PRE
+
+    PRE --> BAN["ban-host-npm.py<br/>host npm -> Docker"]
+    PRE --> SLEEP["no-long-sleep.py<br/>block sleep 30s or more"]
+    PRE --> GIT["subagent-git-tree-guard.py<br/>block tree-global git"]
+    PRE --> DEL["nudge-delegate.py<br/>heavy work -> subagent"]
+    PRE --> HAND["subagent-file-handoff.py<br/>parent creates report file"]
+    PRE --> POST
+
+    POST --> AUDIT["same-file-write-audit.py<br/>warn on repeated writes"]
+    POST --> ANN["subagent-report-announce.py<br/>announce fallback path"]
+    POST --> SUBSTOP
+
+    SUBSTOP --> CAP["subagent-report-capture.py<br/>fallback: save final message"]
+    SUBSTOP --> NUDGE["handoff-nudge.py<br/>follow-on work is delegable"]
+    SUBSTOP --> NOTIFY
+
+    NOTIFY --> DESK["agent-notify.py (Linux)<br/>osascript (macOS)"]
+
+    NOTE["Report handoff: parent creates<br/>.scratch/&lt;shelf&gt;/&lt;agent&gt;-&lt;task&gt;-&lt;slug&gt;.md<br/>child writes -> parent reads"]
+    HAND -.-> NOTE
+    CAP -.-> NOTE
+    ANN -.-> NOTE
+
+    DIAG["precompact-probe.py<br/>tracked, NOT registered<br/>(diagnostic only)"]
+    SUBSTOP -.-> DIAG
+
+    classDef event fill:#f1f3f5,stroke:#868e96,stroke-width:2px
+    classDef steer fill:#d0ebff,stroke:#1971c2,stroke-width:2px
+    classDef guard fill:#ffe3e3,stroke:#c92a2a,stroke-width:2px
+    classDef handoff fill:#d3f9d8,stroke:#2f9e44,stroke-width:2px
+    classDef audit fill:#ffec99,stroke:#f08c00,stroke-width:2px
+    classDef notify fill:#eebefa,stroke:#9c36b5,stroke-width:2px
+    classDef diagnostic fill:#f1f3f5,stroke:#868e96,stroke-width:1px
+
+    class PROMPT,UPS,PRE,POST,SUBSTOP,NOTIFY event
+    class SN,YAS steer
+    class BAN,SLEEP,GIT,DEL guard
+    class HAND,CAP,ANN,NUDGE handoff
+    class AUDIT audit
+    class DESK notify
+    class NOTE,DIAG diagnostic

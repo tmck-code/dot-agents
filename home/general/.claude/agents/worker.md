@@ -67,8 +67,8 @@ stop. Make your final message a handoff:
 
 ## Reporting
 
-Your final message is your report. The hooks save it. Write no report file.
-Include:
+Write your report to the path in the brief. If the brief gave no path, make your
+final message the report. Include:
 
 - files changed, one line each;
 - gate commands run and their results (failures verbatim);

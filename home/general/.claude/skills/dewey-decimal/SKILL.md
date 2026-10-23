@@ -17,7 +17,7 @@ Each branch has one **shelf**: `<repo-root>/.scratch/<branch>/`. `shelf.sh` (in 
 
 ## Shelf rules
 
-- Every non-committed file for the task goes on the shelf. Subagent handoffs go to `<shelf>/<agent>-<task>-<agent_id>.md`.
+- Every non-committed file for the task goes on the shelf. Subagent handoffs go to `<shelf>/<agent>-<task>-<slug>.md`; the parent creates the file and gives the child its path.
 - Filenames must not contain `research` or `report` (any case). A harness check blocks those writes. Use `findings`, `notes`, `summary`, `writeup` or `analysis`.
 - Never move, merge, prune or archive a shelf unless the user names it.
 

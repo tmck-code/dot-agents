@@ -54,11 +54,12 @@ more accurate than you grepping cold. Before you do your own reading:
    invariants, test conventions) — make explicit it should only research and
    report, not edit anything. Spawn independent areas **in parallel** (one
    message, multiple Agent calls).
-3. Give no report path in the brief. Each agent's final message is its
-   report. The user's hooks save it to disk and announce the file path on
-   your next `Agent`/`SendMessage` call. After each completion notification,
-   read that announced file **once**. Do not trust the returned message; it
-   is truncated.
+3. **Create the report file before spawning.** Put it on the shelf as
+   `.scratch/<shelf>/<agent>-<task>-<slug>.md`, create it, and put that exact
+   path in the brief. The agent writes its findings there and returns the path.
+   After each completion notification, read that file **once**. Do not trust
+   the returned message; it is truncated. If a child writes nothing, the
+   `SubagentStop` capture hook supplies a fallback path.
 4. **Wait for every spawned research agent to return before doing any
    research of your own.** No parallel self-exploration while they run —
    duplicated reading wastes tokens and the reports may make it moot. Once
@@ -68,8 +69,8 @@ more accurate than you grepping cold. Before you do your own reading:
 5. **Gaps go to `Explore`.** For every area with no domain agent (or whose
    agent failed), spawn `Explore` to produce an **address map**: one line per
    item, `path:line`, symbol, one-line purpose, covering the modules the
-   change touches and their tests. No code bodies. Same report convention as
-   step 3. Spawn one `Explore` per independent area, in one message, after
+   change touches and their tests. No code bodies. Create its report file and
+   pass the path, as in step 3. Spawn one `Explore` per independent area, in one message, after
    the domain agents have returned. Work from the map; open a source range
    yourself only where the map leaves a decision (an invariant, a signature,
    a config precedence) unresolved, and then only that range.
@@ -132,7 +133,9 @@ re-read. If you read a file whole, don't later re-read slices of it.
 
 ## Reporting back
 
-Report concisely — never paste the artifacts back in full:
+Write your full report to the report-file path your parent created and gave you,
+then return that path. If no path was given, make your final message the report.
+Never paste the artifacts back in full. Cover:
 - the change name and `openspec/changes/<name>/` location,
 - one line per artifact created,
 - the 2–4 load-bearing decisions you made (esp. anything BREAKING or a Non-Goal),
