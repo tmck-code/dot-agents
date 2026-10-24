@@ -15,6 +15,7 @@ home/general/.claude/   shared on every machine: CLAUDE.md, agents, commands,
 home/linux/.claude/     Linux-only: settings.json, hooks/agent-notify.py,
                         scripts/agent-watch.sh
 home/osx/.claude/       macOS-only: settings.json
+docker/opencode/        OpenCode v2 dev image: Node, uv/Python, git
 ```
 
 **Rule:** if both machines can use it, it belongs in `home/general/`. Only
@@ -38,6 +39,41 @@ symlinks that point into this repo but no longer resolve. If a managed directory
 (`agents`, `commands`, `hooks`, `scripts`, `skills`) is itself a symlink into
 this repo, it replaces it with a real directory before linking the files. It
 also sets `core.hooksPath` to `.githooks`.
+
+## Docker (OpenCode)
+
+`docker/opencode/` builds a Debian bookworm image for running OpenCode v2
+against a bind-mounted repo. It includes Node.js/npm, a uv-managed Python, git
+and a C toolchain, and runs as a non-root user built with your host UID/GID.
+
+The official `ghcr.io/anomalyco/opencode` image is multi-arch, but it is Alpine
+and ships only the OpenCode binary — no git, Node.js or Python. This image keeps
+the official v2 installer (rather than npm, which pulls every platform's
+binary) and adds the development toolchain around it.
+
+```
+cd docker/opencode
+make build          # native build for this host, loaded locally
+make test           # toolchain + uv venv smoke test
+make run            # OpenCode TUI in this repo
+make shell          # bash with the same mounts
+```
+
+From any repo:
+
+```
+/path/to/dot-agents/docker/opencode/run.sh
+/path/to/dot-agents/docker/opencode/run.sh --shell
+/path/to/dot-agents/docker/opencode/run.sh run "summarise this repo"
+```
+
+It bind-mounts the repo at the same absolute path, plus `~/.claude` (or
+`$CLAUDE_CONFIG_DIR`), the OpenCode config/data/state/cache dirs, and
+`~/.agents`. Authenticate on the host first (`opencode auth login`) so the
+mounted `auth.json` is reused, or pass provider API keys. `make build` builds
+for the host architecture; `make build-multi PUSH_IMAGE=...` pushes an
+amd64+arm64 manifest. See [docker/opencode/README.md](docker/opencode/README.md)
+for the mount table, worktree handling, auth caveats and UID/GID details.
 
 ## Hooks
 
