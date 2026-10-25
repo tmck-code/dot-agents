@@ -6,7 +6,8 @@
 #   ./run.sh run "explain this"  # any non-TUI OpenCode command
 #
 # Env: IMAGE, REPO_ROOT, CLAUDE_CONFIG_DIR, XDG_*_HOME,
-#      OPENCODE_ENV_PASSTHROUGH="FOO BAR"
+#      OPENCODE_ENV_PASSTHROUGH="FOO BAR",
+#      OPENCODE_DOCKER_ARGS="--network=host"  # extra `docker run` flags
 set -euo pipefail
 
 IMAGE="${IMAGE:-opencode-dev:local}"
@@ -72,6 +73,13 @@ STATE_DIR="$(cd "$STATE_DIR" && pwd -P)"
 CACHE_DIR="$(cd "$CACHE_DIR" && pwd -P)"
 
 docker_args=(run --rm --init)
+
+# Extra `docker run` flags, word-split deliberately (it is a list of flags, not
+# one value). Used by ~/bin/ollama-opencode to add --network=host.
+if [[ -n "${OPENCODE_DOCKER_ARGS:-}" ]]; then
+  read -r -a extra_docker_args <<< "${OPENCODE_DOCKER_ARGS}"
+  docker_args+=("${extra_docker_args[@]}")
+fi
 
 # Allocate a pseudo-TTY only when attached to a terminal.
 if [[ -t 0 ]]; then
