@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Start Ollama on demand, then launch the OpenCode dev container against it.
+#
+#   ollama-opencode                 # OpenCode TUI in the current repo
+#   ollama-opencode --shell         # bash in the same container
+#   ollama-opencode run "hello"     # pass through to `opencode run`
+#   ollama-opencode models --standalone
+#
+# The container joins the host network namespace so 127.0.0.1:11434 is the
+# host's Ollama (no need to expose Ollama on a bridge/LAN address). That means
+# the host OpenCode service port is unavailable inside the container, so the
+# TUI and `run` are started with --standalone (a private server).
+#
+# Env: IMAGE, OPENCODE_DOCKER_RUN_SH, OLLAMA_SERVE, OLLAMA_URL,
+#      OLLAMA_LOG, OLLAMA_START_TIMEOUT, OPENCODE_DOCKER_ARGS
+set -euxo pipefail
+
+RUN_SH="${OPENCODE_DOCKER_RUN_SH:-$HOME/dev/dot-agents/docker/opencode/run.sh}"
+OLLAMA_SERVE="${OLLAMA_SERVE:-$HOME/bin/ollama-serve}"
+OLLAMA_URL="${OLLAMA_URL:-http://127.0.0.1:11434}"
+OLLAMA_LOG="${OLLAMA_LOG:-$HOME/.ollama/serve.log}"
+READY_TIMEOUT="${OLLAMA_START_TIMEOUT:-60}"
+
+if [[ ! -x "$RUN_SH" ]]; then
+  echo "error: OpenCode docker run script not found: $RUN_SH" >&2
+  echo "       set OPENCODE_DOCKER_RUN_SH to override" >&2
+  exit 1
+fi
+if [[ ! -x "$OLLAMA_SERVE" ]]; then
+  echo "error: ollama-serve not found: $OLLAMA_SERVE" >&2
+  exit 1
+fi
+if ! command -v docker >/dev/null 2>&1; then
+  echo "error: docker not found on PATH" >&2
+  exit 1
+fi
+
+ollama_up() {
+  curl -sf "$OLLAMA_URL/api/version" >/dev/null 2>&1
+}
+
+if ! ollama_up; then
+  echo "starting ollama..."
+  mkdir -p "$(dirname "$OLLAMA_LOG")"
+  nohup "$OLLAMA_SERVE" >>"$OLLAMA_LOG" 2>&1 &
+  ollama_pid=$!
+
+  ready=0
+  for ((i = 0; i < READY_TIMEOUT * 4; i++)); do
+    if ollama_up; then
+      ready=1
+      break
+    fi
+    if ! kill -0 "$ollama_pid" 2>/dev/null; then
+      echo "error: ollama-serve exited; last log lines:" >&2
+      tail -n 20 "$OLLAMA_LOG" >&2 || true
+      exit 1
+    fi
+    sleep 0.25
+  done
+
+  if ((!ready)); then
+    echo "error: ollama not ready after ${READY_TIMEOUT}s (see $OLLAMA_LOG)" >&2
+    exit 1
+  fi
+  echo "ollama ready at $OLLAMA_URL (left running after exit)"
+fi
+
+# Host networking: the container's 127.0.0.1 is the host's, so the OpenCode
+# Ollama provider discovery finds the server unchanged.
+export OPENCODE_DOCKER_ARGS="--network=host ${OPENCODE_DOCKER_ARGS:-}"
+
+# The TUI and `run` would otherwise try to reuse the host's managed-service
+# port (shared ~/.local/share/opencode); give them a private server instead.
+if (($# == 0)); then
+  exec "$RUN_SH" --standalone
+fi
+
+if [[ "$1" == "run" ]]; then
+  shift
+  exec "$RUN_SH" run --standalone "$@"
+fi
+
+exec "$RUN_SH" "$@"

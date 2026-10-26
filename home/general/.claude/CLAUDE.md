@@ -28,7 +28,7 @@ Route: subagents absorb noise, you absorb verdicts. Delegate gates, multi-file d
 - 1-2 files at a known location: one `worker`.
 - More than one worker, more than ~3 files, or a check-and-fix loop: one `orchestrator` (OpenSpec changes: `spec-author`/`spec-implementer`). It researches, plans and starts workers; it does not edit code.
 - Follow-ups: start a new agent whose brief points at the previous report file and the files on disk. Do not `SendMessage` a finished agent with a large context.
-- Pass an explicit `model` on every `Agent` call; never use `subagent_type: "fork"` for implementation work.
+- Never use `subagent_type: "fork"` for implementation work.
 
 ## Subagents (pass down in briefs)
 
@@ -36,6 +36,11 @@ Route: subagents absorb noise, you absorb verdicts. Delegate gates, multi-file d
 - The `SubagentStop` capture hook is a fallback for a subagent that writes nothing. If it announces a path, prefer the file you created.
 - Sole writer: one owning agent per file, split by file/module; per-agent scratch subdir; handoffs point at code on disk.
 - Git: path-scoped reads (`git diff <ref> -- <paths>`, `git show <ref>:<path>`); undo by rewriting the file. Tree-level git or co-editing one deliverable needs `isolation: "worktree"`.
+
+## Subagent hygiene
+
+- Subagents must never sleep on long polls or wait for notices or children that weren't explicitly spawned. Poll with short timeouts and report back if stalled.
+- Do not add probe loops in hot generation paths.
 
 ## Gates
 
