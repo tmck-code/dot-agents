@@ -77,6 +77,7 @@ mounts the whole repo. Override either with `REPO_ROOT=/path`.
 | `${XDG_STATE_HOME:-~/.local/state}/opencode` | `/home/agent/.local/state/opencode` | read-write |
 | `${XDG_CACHE_HOME:-~/.cache}/opencode` | `/home/agent/.cache/opencode` | read-write |
 | `~/.gitconfig` (if present) | `/home/agent/.gitconfig` | read-only |
+| `~/.config/gh` (if present) | `/home/agent/.config/gh` | read-only; host `gh auth login` |
 | `~/.ssh` (if present) | `/home/agent/.ssh` | read-only; keys, `config`, `known_hosts` |
 | `$SSH_AUTH_SOCK` (Linux, when running) | `/ssh-agent` | socket, for git over SSH |
 
@@ -115,18 +116,24 @@ SSH remotes work in two ways, and you get both when they are available:
 `known_hosts` is read-only, so a host that is not already known must be trusted
 on the host first, e.g. `ssh-keyscan github.com >> ~/.ssh/known_hosts`.
 
-For HTTPS remotes, a forwarded `GITHUB_TOKEN` (or `GH_TOKEN`) is wired into git
-through `gh` as the credential helper, injected as command-scope config via
-`GIT_CONFIG_*` rather than written to the read-only `~/.gitconfig`:
+For HTTPS remotes, `gh` is git's credential helper (injected as command-scope
+config via `GIT_CONFIG_*`, not written to the read-only `~/.gitconfig`), so
+`git fetch`/`push` reuse the host login:
 
 ```
-export GITHUB_TOKEN=$(gh auth token)   # on the host, in the shell you run ./run.sh from
 ./run.sh --shell -lc 'git push'
 ```
 
-This also overrides any host credential helper (`osxkeychain`, `libsecret`,
-`store`) that does not exist in the image. `gh` itself picks up the same token,
-so `gh pr create`, `gh issue list` and friends work without logging in again.
+That helper also overrides any host credential helper (`osxkeychain`,
+`libsecret`, `store`) that does not exist in the image.
+
+`~/.config/gh` is bind-mounted read-only, so `gh auth status`, `gh pr`, `gh
+issue`, `gh api` and `gh repo` behave as they do on the host — no login step
+inside the container. Mutating commands (`gh auth switch`, `gh auth refresh`,
+`gh auth logout`, `gh config set`) have to be run on the host, since the mount
+cannot be written. gh stores the OAuth token in `hosts.yml`; if a host keeps it
+in a system keyring instead, export `GITHUB_TOKEN` (or `GH_TOKEN`) in the shell
+that runs `run.sh` and `gh`/git will use that instead.
 
 ## Statusline (local TUI plugins)
 
@@ -233,8 +240,9 @@ make build OPENCODE_VERSION=2.1.5 PYTHON_VERSION=3.12
 - The repo is mounted **read-write** and the agent can run arbitrary commands
   in it.
 - Your Claude/OpenCode config, credentials (`auth.json`), sessions,
-  `~/.gitconfig` and `~/.ssh` are mounted. `~/.ssh` and `~/.gitconfig` are
-  read-only, but every process in the container can read your private keys.
-  Do not run this on untrusted repos unless you accept that exposure.
+  `~/.gitconfig`, `~/.config/gh` and `~/.ssh` are mounted. They are read-only,
+  but every process in the container can read your private keys and the gh
+  OAuth token. Do not run this on untrusted repos unless you accept that
+  exposure.
 - Provider and GitHub tokens passed with `--env` are visible to the container
   process and to anything it runs. Prefer host-side `opencode auth login`.

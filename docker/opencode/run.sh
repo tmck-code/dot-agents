@@ -185,6 +185,24 @@ if [[ -d "$HOME/.agents" ]]; then
   docker_args+=(-v "$HOME/.agents:/home/agent/.agents")
 fi
 
+# GitHub CLI config, so `gh auth status`, `gh pr`, `gh api`, ... use the host
+# login. gh keeps the OAuth token in hosts.yml when the host does not use a
+# system keyring, so mounting the directory is enough; no token env var (and
+# nothing secret in `docker inspect`). Read-only: every read/API command works,
+# but mutating ones (`gh auth switch`, `gh auth refresh`, `gh config set`) must
+# be run on the host. A host that stores the token in a keyring instead needs
+# GITHUB_TOKEN/GH_TOKEN exported (see the credential-helper block below).
+GH_CONFIG_DIR="${GH_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/gh}"
+gh_config_mounted=0
+if [[ -d "$GH_CONFIG_DIR" ]]; then
+  GH_CONFIG_DIR="$(cd "$GH_CONFIG_DIR" && pwd -P)"
+  docker_args+=(
+    -v "$GH_CONFIG_DIR:/home/agent/.config/gh:ro"
+    --env GH_CONFIG_DIR=/home/agent/.config/gh
+  )
+  gh_config_mounted=1
+fi
+
 if [[ -f "$HOME/.gitconfig" ]]; then
   docker_args+=(-v "$HOME/.gitconfig:/home/agent/.gitconfig:ro")
 fi
@@ -225,12 +243,13 @@ do
   pass_env "$name"
 done
 
-# HTTPS GitHub remotes: use `gh` as the credential helper so a forwarded
-# GITHUB_TOKEN/GH_TOKEN authenticates fetch/push without a login inside the
-# container. Injected as command-scope git config (GIT_CONFIG_*) because the
-# bind-mounted ~/.gitconfig is read-only, and because any credential helper
-# named there (osxkeychain, libsecret, ...) does not exist in the image.
-if [[ -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]; then
+# HTTPS GitHub remotes: use `gh` as the credential helper so a host `gh auth
+# login` (mounted config) or a forwarded GITHUB_TOKEN/GH_TOKEN authenticates
+# fetch/push without logging in again inside the container. Injected as
+# command-scope git config (GIT_CONFIG_*) because the bind-mounted ~/.gitconfig
+# is read-only, and because any credential helper named there (osxkeychain,
+# libsecret, ...) does not exist in the image.
+if (( gh_config_mounted )) || [[ -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]; then
   docker_args+=(
     --env GIT_CONFIG_COUNT=1
     --env GIT_CONFIG_KEY_0=credential.https://github.com.helper
