@@ -1,57 +1,126 @@
 # syntax=docker/dockerfile:1.7
 
-# Base image with dependencies only (no COPY from stages)
+# OpenCode v2 dev image: Debian bookworm with Node.js and a uv-managed Python.
+# Arch-neutral: the OpenCode installer picks linux-x64 or linux-arm64 itself.
+ARG NODE_VERSION=24.22.1
+ARG UV_VERSION=0.13.5
+
+FROM node:${NODE_VERSION}-bookworm-slim AS node
+
+FROM ghcr.io/astral-sh/uv:${UV_VERSION} AS uv
+
 FROM debian:bookworm-slim
 
+ARG OPENCODE_VERSION=2.1.4
+ARG PYTHON_VERSION=3.13
+ARG UID=1000
+ARG GID=1000
+ARG DEBIAN_FRONTEND=noninteractive
+
+# Runtime and build toolchain. Several packages are needed to compile Python
+# wheels that have no manylinux build for the target architecture.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    git \
-    jq \
-    less \
-    openssh-client \
-    procps \
-    ripgrep \
-    unzip \
-    xz-utils \
-    build-essential \
-    pkg-config && rm -rf /var/lib/apt/lists/*
+    apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      git \
+      git-lfs \
+      gnupg \
+      jq \
+      less \
+      openssh-client \
+      procps \
+      ripgrep \
+      unzip \
+      xz-utils \
+      build-essential \
+      pkg-config \
+      libssl-dev \
+      libffi-dev \
+      zlib1g-dev \
+      libsqlite3-dev \
+      libbz2-dev \
+      libreadline-dev \
+      liblzma-dev \
+ && rm -rf /var/lib/apt/lists/*
 
-# Install Python via uv (local binary download with proper permissions)
-RUN curl -fsL "https://github.com/astral-sh/uv/releases/download/0.13.5/uv-3.13-linux-x86_64.tar.gz" \
-    > /usr/local/bin/uv && chmod +x /usr/local/bin/uv && \
-    tar -xf /usr/local/bin/uv* -C /usr/local/bin/ 2>/dev/null || :
+# Git LFS filter, installed system-wide so every user (including bind-mounted
+# repos with lfs.* filters in ~/.gitconfig) resolves `git lfs` without running
+# `git lfs install` per repo.
+RUN git lfs install --system --skip-repo \
+ && git lfs version
 
-RUN --mount=type=cache,target=/root/.cache,sharing=locked \
-    chmod +x /usr/local/bin/uv && \
-    uv python install "${PYTHON_VERSION}" --no-bin || true
+# GitHub CLI from GitHub's own apt repository (Debian bookworm does not package
+# it). Used for PRs/issues and as the git credential helper for HTTPS remotes.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    mkdir -p -m 755 /etc/apt/keyrings \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/* \
+ && gh --version
 
-ENV PATH="$PATH:/opt/uv/.local/bin"
+# Node.js from the official image: binary, npm/corepack modules and headers.
+# The npm/npx/corepack symlinks are recreated because COPY does not carry the
+# ones from /usr/local/bin.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=node /usr/local/include/node /usr/local/include/node
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+ && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+ && ln -s ../lib/node_modules/corepack/dist/corepack.js /usr/local/bin/corepack \
+ && node --version \
+ && npm --version
 
-# Download Ollama binary from GitHub raw
-RUN curl -fsSL "https://raw.githubusercontent.com/ollama/ollama/main/README.md" \
-    | grep -o 'https://github.com\./ollama-linux.*amd64' && true || :
+# uv, plus one managed CPython shared by the root build steps and the agent.
+COPY --from=uv /uv /uvx /usr/local/bin/
 
-ENV OLLAMA_MAX_NUM_PRETOKENIZED=2048 \
-    OLLAMA_ORIGINS="*"
+ENV UV_PYTHON_INSTALL_DIR=/opt/uv/python \
+    UV_PYTHON_PREFERENCE=only-managed \
+    UV_LINK_MODE=copy \
+    UV_COMPILE_BYTECODE=1
 
-# Install opencode via npm registry directly
+RUN uv python install "${PYTHON_VERSION}" --no-bin \
+ && PYTHON_BIN="$(uv python find "${PYTHON_VERSION}")" \
+ && ln -sf "${PYTHON_BIN}" /usr/local/bin/python \
+ && ln -sf "${PYTHON_BIN}" /usr/local/bin/python3 \
+ && ln -sf "${PYTHON_BIN}" "/usr/local/bin/$(basename "${PYTHON_BIN}")" \
+ && chmod -R a+rX /opt/uv \
+ && python --version \
+ && python3 --version
+
+# OpenCode v2 via the official installer. npm would pull every platform
+# variant (~916 MB); the installer downloads only this architecture's binary.
+RUN curl -fsSL https://opencode.ai/v2/install -o /tmp/opencode-install.sh \
+ && bash /tmp/opencode-install.sh --version "${OPENCODE_VERSION}" --no-modify-path \
+ && mv /root/.opencode/bin/opencode /usr/local/bin/opencode \
+ && rm -rf /root/.opencode /tmp/opencode-install.sh \
+ && ln -s /usr/local/bin/opencode /usr/local/bin/opencode2 \
+ && opencode --version
+
+# Non-root user matching the host UID/GID. macOS reports GID 20 (staff), which
+# is already "dialout" in Debian, so reuse the existing group name when the GID
+# is taken. A taken UID is a hard error: pick another UID with `make build
+# UID=...`.
 RUN set -eux; \
-    npm config set prefix /home/.opencode/local/bin && \
-    npm install --global opencode@${OPENCODE_VERSION} --no-save || true
-
-ENV PATH="$PATH:/opt/uv/.local/bin"
-
-# Non-root user
-RUN set -eux; \
-    if getent group "1000" >/dev/null; then \
-      GROUP_NAME="$(getent group "1000" | cut -d: -f1)"; \
+    if getent group "${GID}" >/dev/null; then \
+      GROUP_NAME="$(getent group "${GID}" | cut -d: -f1)"; \
     else \
-      groupadd --gid "1000" agent && GROUP_NAME=agent; \
+      groupadd --gid "${GID}" agent; \
+      GROUP_NAME=agent; \
     fi; \
-    useradd --uid "1000" --gid "$GROUP_NAME" \
+    if getent passwd "${UID}" >/dev/null; then \
+      echo "ERROR: UID ${UID} already exists in the image; rebuild with UID=<free uid>" >&2; \
+      exit 1; \
+    fi; \
+    useradd --uid "${UID}" --gid "${GROUP_NAME}" \
             --create-home --home-dir /home/agent --shell /bin/bash agent; \
     mkdir -p \
       /home/agent/.local/bin \
@@ -61,20 +130,28 @@ RUN set -eux; \
       /home/agent/.cache/opencode \
       /home/agent/.npm \
       /home/agent/.claude \
-      /home/agent/.agents && chown -R agent:"$GROUP_NAME" /home/agent
+      /home/agent/.agents; \
+    chown -R agent:"${GROUP_NAME}" /home/agent
 
+# Bind-mounted repos are owned by the host user, which the container cannot
+# resolve; without this git refuses them as "dubious ownership".
 RUN git config --system --add safe.directory '*'
 
 ENV HOME=/home/agent \
-    NPM_CONFIG_PREFIX=/home/.opencode/local/bin \
-    PATH=/home/.opencode/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    NPM_CONFIG_PREFIX=/home/agent/.local \
+    PATH=/home/agent/.local/bin:/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
     LANG=C.UTF-8
 
 LABEL org.opencontainers.image.title="OpenCode dev image" \
-      org.opencontainers.image.description="OpenCode v2 with Node.js, uv-managed Python, and Ollama integration" \
+      org.opencontainers.image.description="OpenCode v2 with Node.js, a uv-managed Python, git, gh and Ollama integration" \
       org.opencontainers.image.source="https://github.com/tmck-code/dot-agents" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${OPENCODE_VERSION}" \
+      dev.opencode.version="${OPENCODE_VERSION}" \
+      dev.opencode.python.version="${PYTHON_VERSION}" \
+      dev.opencode.uid="${UID}" \
+      dev.opencode.gid="${GID}"
 
-USER 1000
+USER agent
 WORKDIR /home/agent
 ENTRYPOINT ["opencode"]
