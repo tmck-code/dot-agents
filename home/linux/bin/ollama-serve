@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Start Ollama with the local-model settings used by OpenCode.
+# Manual/on-demand: run this instead of plain `ollama serve`.
+set -euxo pipefail
+
+if ! command -v ollama >/dev/null 2>&1; then
+  echo "ollama-serve: ollama not found on PATH" >&2
+  exit 1
+fi
+
+if ss -lnt 2>/dev/null | grep -q ':11434 '; then
+  echo "ollama-serve: something is already listening on :11434" >&2
+  exit 1
+fi
+
+export OLLAMA_FLASH_ATTENTION=1
+export OLLAMA_KV_CACHE_TYPE=q8_0
+export OLLAMA_NUM_PARALLEL=1
+export OLLAMA_MAX_LOADED_MODELS=1
+# Must match provider.ollama.models."qwen3.5:4b".limit.context
+# in ~/.config/opencode/opencode.jsonc. Set explicitly so an inherited
+# value (e.g. 64000 from `ollama launch`) cannot silently win.
+export OLLAMA_CONTEXT_LENGTH=32768
+
+exec ollama serve

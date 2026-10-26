@@ -74,6 +74,41 @@ CACHE_DIR="$(cd "$CACHE_DIR" && pwd -P)"
 
 docker_args=(run --rm --init)
 
+# OpenCode v2 registers local TUI/CLI plugins in cli.json by absolute path
+# (for example the YAS statusline). They live outside the config dir, so mount
+# each one at its host path to keep that absolute entry resolvable. npm package
+# names are installed inside the container and need no mount.
+CONFIG_FILE=""
+for candidate in "$CONFIG_DIR/cli.json" "$CONFIG_DIR/cli.jsonc"; do
+  if [[ -f "$candidate" ]]; then
+    CONFIG_FILE="$candidate"
+    break
+  fi
+done
+if [[ -n "$CONFIG_FILE" ]]; then
+  if command -v jq >/dev/null 2>&1; then
+    while IFS= read -r plugin; do
+      [[ -n "$plugin" ]] || continue
+      # Bare specifiers are container-local packages; only paths are mounted.
+      [[ "$plugin" == /* ]] || continue
+      if [[ ! -d "$plugin" ]]; then
+        echo "warning: plugin path in $CONFIG_FILE is not a host directory: $plugin" >&2
+        continue
+      fi
+      case "$plugin" in
+        "$REPO_ROOT"|"$REPO_ROOT"/*|"$CLAUDE_DIR"|"$CLAUDE_DIR"/*|"$CONFIG_DIR"|"$CONFIG_DIR"/*) continue ;;
+      esac
+      docker_args+=(-v "$plugin:$plugin:ro")
+    done < <(
+      jq -r '(.plugins // [])[]
+             | if type == "string" then . elif type == "object" then (.package // empty) else empty end' \
+        "$CONFIG_FILE" 2>/dev/null || true
+    )
+  else
+    echo "warning: jq not found; local plugin paths in $CONFIG_FILE will not be mounted" >&2
+  fi
+fi
+
 # Extra `docker run` flags, word-split deliberately (it is a list of flags, not
 # one value). Used by ~/bin/ollama-opencode to add --network=host.
 if [[ -n "${OPENCODE_DOCKER_ARGS:-}" ]]; then

@@ -1,8 +1,6 @@
 # syntax=docker/dockerfile:1.7
 
-################################################################################
 # Base image with dependencies only (no COPY from stages)
-################################################################################
 FROM debian:bookworm-slim
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -21,9 +19,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     build-essential \
     pkg-config && rm -rf /var/lib/apt/lists/*
 
-################################################################################
 # Install Python via uv (local binary download with proper permissions)
-################################################################################
 RUN curl -fsL "https://github.com/astral-sh/uv/releases/download/0.13.5/uv-3.13-linux-x86_64.tar.gz" \
     > /usr/local/bin/uv && chmod +x /usr/local/bin/uv && \
     tar -xf /usr/local/bin/uv* -C /usr/local/bin/ 2>/dev/null || :
@@ -34,27 +30,21 @@ RUN --mount=type=cache,target=/root/.cache,sharing=locked \
 
 ENV PATH="$PATH:/opt/uv/.local/bin"
 
-################################################################################
 # Download Ollama binary from GitHub raw
-################################################################################
 RUN curl -fsSL "https://raw.githubusercontent.com/ollama/ollama/main/README.md" \
     | grep -o 'https://github.com\./ollama-linux.*amd64' && true || :
 
 ENV OLLAMA_MAX_NUM_PRETOKENIZED=2048 \
     OLLAMA_ORIGINS="*"
 
-################################################################################
 # Install opencode via npm registry directly
-################################################################################
 RUN set -eux; \
     npm config set prefix /home/.opencode/local/bin && \
     npm install --global opencode@${OPENCODE_VERSION} --no-save || true
 
 ENV PATH="$PATH:/opt/uv/.local/bin"
 
-################################################################################
 # Non-root user
-################################################################################
 RUN set -eux; \
     if getent group "1000" >/dev/null; then \
       GROUP_NAME="$(getent group "1000" | cut -d: -f1)"; \

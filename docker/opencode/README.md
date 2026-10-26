@@ -70,7 +70,8 @@ mounts the whole repo. Override either with `REPO_ROOT=/path`.
 | main working tree (linked worktrees) | same absolute path | read-only; keeps `~/.claude` symlinks resolving |
 | `${CLAUDE_CONFIG_DIR:-~/.claude}` | `/home/agent/.claude` | read-write; skills, commands |
 | `~/.agents` (if present) | `/home/agent/.agents` | read-write; OpenCode skills |
-| `${XDG_CONFIG_HOME:-~/.config}/opencode` | `/home/agent/.config/opencode` | read-write; config |
+| `${XDG_CONFIG_HOME:-~/.config}/opencode` | `/home/agent/.config/opencode` | read-write; config, including `cli.json` |
+| local plugin dirs listed in `cli.json` | same absolute path | read-only; keeps absolute `plugins` entries resolvable |
 | `${XDG_DATA_HOME:-~/.local/share}/opencode` | `/home/agent/.local/share/opencode` | read-write; auth, sessions, db |
 | `${XDG_STATE_HOME:-~/.local/state}/opencode` | `/home/agent/.local/state/opencode` | read-write |
 | `${XDG_CACHE_HOME:-~/.cache}/opencode` | `/home/agent/.cache/opencode` | read-write |
@@ -90,6 +91,39 @@ In a linked worktree, git keeps metadata under the main repo's
 repo mount, so `git status`, commits, and hooks work in the container. It also
 mounts the main working tree read-only, so absolute `~/.claude` symlinks into
 the main checkout resolve while writes to it stay blocked.
+
+## Statusline (local TUI plugins)
+
+OpenCode v2 has no `statusLine` command like Claude Code. A custom statusline is
+a TUI plugin registered by path in `~/.config/opencode/cli.json`:
+
+```jsonc
+{
+  "plugins": [
+    "/home/you/dev/yet-another-statusline/.scratch/feat-opencode-statusline/yas-lite"
+  ]
+}
+```
+
+That path is absolute, so it does not exist in the container by default.
+`run.sh` reads `cli.json` (or `cli.jsonc`) and, for every absolute entry that is
+a host directory, bind-mounts it read-only at the same path. Bare package names
+(`"some-plugin"`) are left to OpenCode's in-container install. Entries already
+covered by the repo, `~/.claude` or the config mount are skipped. Parsing needs
+`jq` on the host; without it `run.sh` prints a warning and skips local plugin
+mounts.
+
+A local plugin keeps its own `node_modules` (OpenCode transpiles the TSX and
+resolves the host's peer dependencies), so mount the checkout directory, not
+just `tui.tsx`. To confirm the container resolves it:
+
+```
+./run.sh --shell -lc 'opencode plugin list'
+```
+
+The image must run the same OpenCode major version the plugin targets (the
+default is v2.1.4). A plugin that writes into its own directory will fail
+because the mount is read-only.
 
 ## Auth and networking
 
