@@ -218,10 +218,25 @@ for name in \
   MISTRAL_API_KEY \
   XAI_API_KEY \
   DEEPSEEK_API_KEY \
-  GITHUB_TOKEN
+  GITHUB_TOKEN \
+  GH_TOKEN \
+  GH_HOST
 do
   pass_env "$name"
 done
+
+# HTTPS GitHub remotes: use `gh` as the credential helper so a forwarded
+# GITHUB_TOKEN/GH_TOKEN authenticates fetch/push without a login inside the
+# container. Injected as command-scope git config (GIT_CONFIG_*) because the
+# bind-mounted ~/.gitconfig is read-only, and because any credential helper
+# named there (osxkeychain, libsecret, ...) does not exist in the image.
+if [[ -n "${GITHUB_TOKEN:-}" || -n "${GH_TOKEN:-}" ]]; then
+  docker_args+=(
+    --env GIT_CONFIG_COUNT=1
+    --env GIT_CONFIG_KEY_0=credential.https://github.com.helper
+    --env "GIT_CONFIG_VALUE_0=!gh auth git-credential"
+  )
+fi
 
 if [[ -n "${OPENCODE_ENV_PASSTHROUGH:-}" ]]; then
   read -r -a passthrough <<< "${OPENCODE_ENV_PASSTHROUGH//,/ }"
@@ -234,10 +249,20 @@ if [[ -n "${OPENCODE_ENV_PASSTHROUGH:-}" ]]; then
   done
 fi
 
-# Forward the SSH agent on Linux only. On macOS the agent socket lives in the
-# host's launchd session and is not shared with Docker Desktop's VM without an
-# extra socket forwarder (e.g. ssh-agent over TCP), so we skip it rather than
-# mount a path that does not resolve.
+# SSH keys and config, read-only. Mounted at the container HOME so the
+# `IdentityFile ~/.ssh/...` paths in ~/.ssh/config, and git's default key
+# lookup, resolve. This makes git-over-SSH work even when no agent is running
+# on the host. Read-only means a host that is not already in known_hosts must
+# be trusted on the host first (`ssh-keyscan HOST >> ~/.ssh/known_hosts`).
+if [[ -d "$HOME/.ssh" ]]; then
+  ssh_dir="$(cd "$HOME/.ssh" && pwd -P)"
+  docker_args+=(-v "$ssh_dir:/home/agent/.ssh:ro")
+fi
+
+# Forward the SSH agent when there is one. Linux only: on macOS the agent
+# socket lives in the host's launchd session and is not shared with Docker
+# Desktop's VM without an extra socket forwarder (e.g. ssh-agent over TCP);
+# key-file auth via the mount above still works there.
 if [[ "$HOST_OS" == Linux && -n "${SSH_AUTH_SOCK:-}" && -S "$SSH_AUTH_SOCK" ]]; then
   docker_args+=(-v "$SSH_AUTH_SOCK:/ssh-agent" --env SSH_AUTH_SOCK=/ssh-agent)
 fi

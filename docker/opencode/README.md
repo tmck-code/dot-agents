@@ -10,6 +10,7 @@ Node.js/npm, and Python managed by uv.
 | Node.js / npm | 24.22.1 / 11.19.1 (bundled) |
 | Python | 3.13 (uv-managed, no system Python) |
 | uv | 0.13.5 |
+| git / gh / git-lfs | 2.39 / 2.103 / 3.3 (Debian + GitHub apt repo) |
 | Base | `debian:bookworm-slim` |
 
 It runs as a non-root `agent` user built with your host UID/GID.
@@ -76,7 +77,8 @@ mounts the whole repo. Override either with `REPO_ROOT=/path`.
 | `${XDG_STATE_HOME:-~/.local/state}/opencode` | `/home/agent/.local/state/opencode` | read-write |
 | `${XDG_CACHE_HOME:-~/.cache}/opencode` | `/home/agent/.cache/opencode` | read-write |
 | `~/.gitconfig` (if present) | `/home/agent/.gitconfig` | read-only |
-| `$SSH_AUTH_SOCK` (Linux) | `/ssh-agent` | socket, for git over SSH |
+| `~/.ssh` (if present) | `/home/agent/.ssh` | read-only; keys, `config`, `known_hosts` |
+| `$SSH_AUTH_SOCK` (Linux, when running) | `/ssh-agent` | socket, for git over SSH |
 
 `CLAUDE_CONFIG_DIR` is set to `/home/agent/.claude` inside the container. A host
 `OPENCODE_CONFIG_DIR` is deliberately not forwarded, so OpenCode uses its
@@ -91,6 +93,40 @@ In a linked worktree, git keeps metadata under the main repo's
 repo mount, so `git status`, commits, and hooks work in the container. It also
 mounts the main working tree read-only, so absolute `~/.claude` symlinks into
 the main checkout resolve while writes to it stay blocked.
+
+## Git and GitHub
+
+Git is preconfigured for bind-mounted repos (`safe.directory=*`), and
+`~/.gitconfig` is mounted read-only so your name, email, aliases and colour
+settings apply inside the container. `git-lfs` is installed and registered
+system-wide, so repos that use LFS (and the `filter.lfs.*` config in the
+mounted `~/.gitconfig`) clone and check out normally.
+
+SSH remotes work in two ways, and you get both when they are available:
+
+- `~/.ssh` is mounted read-only at `/home/agent/.ssh`, so `IdentityFile`
+  paths in `~/.ssh/config` and git's default `id_*` lookup resolve. This works
+  even when no agent is running on the host.
+- `$SSH_AUTH_SOCK` is forwarded on Linux when an agent is running, which covers
+  passphrase-protected keys already unlocked in the agent. On macOS the agent
+  socket lives in the host session and is not visible to Docker Desktop without
+  a separate socket forwarder; key-file auth via the mount still works.
+
+`known_hosts` is read-only, so a host that is not already known must be trusted
+on the host first, e.g. `ssh-keyscan github.com >> ~/.ssh/known_hosts`.
+
+For HTTPS remotes, a forwarded `GITHUB_TOKEN` (or `GH_TOKEN`) is wired into git
+through `gh` as the credential helper, injected as command-scope config via
+`GIT_CONFIG_*` rather than written to the read-only `~/.gitconfig`:
+
+```
+export GITHUB_TOKEN=$(gh auth token)   # on the host, in the shell you run ./run.sh from
+./run.sh --shell -lc 'git push'
+```
+
+This also overrides any host credential helper (`osxkeychain`, `libsecret`,
+`store`) that does not exist in the image. `gh` itself picks up the same token,
+so `gh pr create`, `gh issue list` and friends work without logging in again.
 
 ## Statusline (local TUI plugins)
 
@@ -130,16 +166,15 @@ because the mount is read-only.
 - API keys set on the host are forwarded: `ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`,
   `GEMINI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`,
-  `DEEPSEEK_API_KEY`, `GITHUB_TOKEN`. Add more exported names with
-  `OPENCODE_ENV_PASSTHROUGH="MY_KEY OTHER_KEY"`.
+  `DEEPSEEK_API_KEY`, `GITHUB_TOKEN`, `GH_TOKEN`, `GH_HOST`. Add more exported
+  names with `OPENCODE_ENV_PASSTHROUGH="MY_KEY OTHER_KEY"`.
 - Prefer `opencode auth login` on the host. An OAuth login started *inside*
   the container opens a host browser but the callback listener lives in the
   container, so the redirect will not complete; API keys avoid this.
 - Host MCP servers are reachable at `host.docker.internal`; `run.sh` adds the
   Linux `host-gateway` mapping and Docker Desktop provides it on macOS.
-- The SSH agent is forwarded on Linux only. On macOS the agent socket lives in
-  the host session and is not visible to Docker Desktop without a separate
-  socket forwarder (for example ssh-agent over TCP).
+- See [Git and GitHub](#git-and-github) for SSH keys, the SSH agent and token
+  auth for `git`/`gh`.
 
 ## Multi-arch
 
@@ -197,8 +232,9 @@ make build OPENCODE_VERSION=2.1.5 PYTHON_VERSION=3.12
 
 - The repo is mounted **read-write** and the agent can run arbitrary commands
   in it.
-- Your Claude/OpenCode config, credentials (`auth.json`), sessions, and
-  `~/.gitconfig` are mounted. Do not run this on untrusted repos unless you
-  accept that exposure.
-- Provider keys passed with `--env` are visible to the container process and
-  to anything it runs. Prefer host-side `opencode auth login`.
+- Your Claude/OpenCode config, credentials (`auth.json`), sessions,
+  `~/.gitconfig` and `~/.ssh` are mounted. `~/.ssh` and `~/.gitconfig` are
+  read-only, but every process in the container can read your private keys.
+  Do not run this on untrusted repos unless you accept that exposure.
+- Provider and GitHub tokens passed with `--env` are visible to the container
+  process and to anything it runs. Prefer host-side `opencode auth login`.

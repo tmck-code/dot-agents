@@ -5,11 +5,14 @@
   },
   "permissions": {
     "deny": [
+      "Artifact",
       "AskUserQuestion",
       "DesignSync",
       "EndConversation",
       "EnterPlanMode",
-      "ExitPlanMode"
+      "ExitPlanMode",
+      "PushNotification",
+      "Workflow"
     ]
   },
   "model": "opus",
@@ -160,13 +163,13 @@
       }
     ]
   },
-  "disableRemoteControl": false,
+  "disableRemoteControl": true,
   "disableArtifact": true,
   "statusLine": {
     "type": "command",
     "command": "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/yas.sh\" statusline",
     "padding": 1,
-    "refreshInterval": 1
+    "refreshInterval": 2
   },
   "enabledPlugins": {
     "skill-creator@claude-plugins-official": false,
@@ -185,7 +188,12 @@
     "code-simplifier@claude-plugins-official": false,
     "pyright-lsp@claude-plugins-official": false,
     "plugin-dev@claude-plugins-official": false,
-    "yas@yet-another-statusline": false
+    "yas@yet-another-statusline": false,
+    "data@synced": false,
+    "design@synced": false,
+    "cc-plugin-diff@builtin": false,
+    "cc-plugin-plugin-authoring@builtin": false,
+    "cc-plugin-agents-md@builtin": false
   },
   "extraKnownMarketplaces": {
     "claude-plugins-official": {
@@ -199,6 +207,11 @@
   "tui": "fullscreen",
   "autoMemoryEnabled": false,
   "skipDangerousModePermissionPrompt": true,
-  "remoteControlAtStartup": true,
-  "agentPushNotifEnabled": true
+  "remoteControlAtStartup": false,
+  "agentPushNotifEnabled": true,
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "autoCompactWindow": 400000
+    }
+  }
 }
