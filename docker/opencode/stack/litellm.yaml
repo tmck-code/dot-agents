@@ -1,0 +1,35 @@
+# LiteLLM reverse proxy for the OpenCode agent.
+#
+# Provider root keys are read from the environment of this container only. The
+# agent receives a per-lease virtual key with a model allowlist, budget and
+# duration. Add or remove providers here; keep the aliases in sync with
+# docker/opencode/config/opencode.jsonc.
+model_list:
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: claude-opus
+    litellm_params:
+      model: anthropic/claude-opus-4-1
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: gpt-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: deepseek-chat
+    litellm_params:
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Virtual keys need a database. SQLite keeps the stack local and free; the
+  # file lives on the dedicated litellm-data volume.
+  database_url: os.environ/LITELLM_DATABASE_URL
+  disable_spend_logs: false
+  store_model_in_db: false
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false

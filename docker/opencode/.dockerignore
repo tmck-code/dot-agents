@@ -1,0 +1,27 @@
+# Build context hygiene. The build only needs Dockerfile, config/ and bin/.
+# Never ship credentials, host state, git metadata or scratch files.
+.git
+.gitignore
+.scratch
+.env
+.env.*
+*.kdbx
+*.kdbx.key
+auth.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+audit.jsonl
+lease-token
+lease-admin.token
+secrets/
+stack/
+test/
+broker/
+docs/
+home/
+node_modules/
+README.md
+Dockerfile.new

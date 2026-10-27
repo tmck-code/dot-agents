@@ -10,6 +10,16 @@ set -euo pipefail
 [[ "${SKIP_SETTINGS_DRIFT:-}" == "1" ]] && exit 0
 
 repo_root=$(git rev-parse --show-toplevel)
+
+# --- 0. obsolete files and secrets --------------------------------------------------
+if [[ -e "$repo_root/docker/opencode/Dockerfile.new" ]]; then
+  echo "pre-commit: docker/opencode/Dockerfile.new is obsolete; edit Dockerfile instead." >&2
+  exit 1
+fi
+if [[ -x "$repo_root/scripts/secret-scan.sh" ]]; then
+  "$repo_root/scripts/secret-scan.sh"
+fi
+
 linux="$repo_root/home/linux/.claude/settings.json"
 osx="$repo_root/home/osx/.claude/settings.json"
 

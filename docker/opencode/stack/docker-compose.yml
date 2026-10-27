@@ -1,0 +1,226 @@
+# Local-only security stack for the hardened OpenCode launcher.
+#
+#   opencode-agent  (internal: true)  agent, squid, broker, litellm
+#   opencode-egress (bridge)          squid, broker, broker-admin, litellm
+#
+# The agent is attached to the internal network only. Squid is the only generic
+# egress path; LiteLLM is the only model-provider path; the broker is the only
+# GitHub credential path.
+name: opencode-stack
+
+networks:
+  opencode-agent:
+    name: opencode-agent
+    internal: true
+  opencode-egress:
+    name: opencode-egress
+    driver: bridge
+  # Model-key state only. The agent is not attached, so it cannot reach the
+  # LiteLLM database directly.
+  opencode-data:
+    name: opencode-data
+    internal: true
+
+volumes:
+  broker-state:
+    name: opencode-broker-state
+  squid-logs:
+    name: opencode-squid-logs
+  litellm-db:
+    name: opencode-litellm-db
+
+x-broker: &broker
+  image: opencode-lease-broker:local
+  build:
+    context: ../broker
+    dockerfile: Dockerfile
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:mode=1777,size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  volumes:
+    - broker-state:/state
+    - ./secrets:/run/secrets:ro
+  environment:
+    BROKER_DB: /state/broker.db
+    BROKER_ADMIN_TOKEN: ${BROKER_ADMIN_TOKEN:-}
+    BROKER_DEFAULT_TTL_SECONDS: ${BROKER_DEFAULT_TTL_SECONDS:-28800}
+    BROKER_MAX_TTL_SECONDS: ${BROKER_MAX_TTL_SECONDS:-86400}
+    BROKER_REFRESH_SKEW_SECONDS: ${BROKER_REFRESH_SKEW_SECONDS:-300}
+    GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+    GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+    GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
+    GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
+    LITELLM_URL: http://litellm:4000
+    LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+    LITELLM_MODELS: ${LITELLM_MODELS:-claude-sonnet,claude-opus,gpt-mini,deepseek-chat}
+
+services:
+  squid:
+    image: ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
+    container_name: opencode-squid
+    restart: unless-stopped
+    networks:
+      - opencode-agent
+      - opencode-egress
+    read_only: true
+    tmpfs:
+      - /run:mode=1777,size=16m
+      - /var/spool/squid:mode=1777,size=64m
+    volumes:
+      - ./squid.conf:/etc/squid/squid.conf:ro
+      - squid-logs:/var/log/squid
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/3128'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
+    container_name: opencode-postgres
+    restart: unless-stopped
+    networks:
+      - opencode-data
+    read_only: true
+    tmpfs:
+      - /run/postgresql:mode=1777,size=16m
+      - /tmp:mode=1777,size=64m
+    volumes:
+      - litellm-db:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: litellm
+      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm-local}
+      POSTGRES_DB: litellm
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U litellm -d litellm"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable@sha256:c169fb3adc514fcf210377c203f3de406d54f10bfdacf13948a4a839db9af7de
+    container_name: opencode-litellm
+    restart: unless-stopped
+    user: "1000:1000"
+    networks:
+      - opencode-agent
+      - opencode-egress
+      - opencode-data
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+      - /app/.cache:mode=1777,size=256m
+    volumes:
+      - ./litellm.yaml:/app/config.yaml:ro
+      - ./secrets:/run/secrets:ro
+    environment:
+      HOME: /tmp
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      LITELLM_DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm-local}@postgres:5432/litellm
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Provider root keys are read from a read-only secret mount at startup and
+    # only ever exist in this container's environment, never in the agent.
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        set -a
+        [ -f /run/secrets/litellm.env ] && . /run/secrets/litellm.env
+        set +a
+        exec litellm --config /app/config.yaml --port 4000 --num_workers 1
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:4000/health/liveliness', timeout=3)"
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 30s
+
+  broker:
+    <<: *broker
+    container_name: opencode-broker
+    networks:
+      - opencode-agent
+      - opencode-egress
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # Host-only admin listener. It is not attached to opencode-agent, so the
+  # agent cannot reach lease administration even though it shares the state
+  # volume. The host publishes it on loopback only.
+  broker-admin:
+    <<: *broker
+    container_name: opencode-broker-admin
+    command:
+      - uvicorn
+      - broker.admin_app:create_app
+      - --factory
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8081"
+      - --no-access-log
+    networks:
+      - opencode-egress
+    ports:
+      - 127.0.0.1:8081:8081
+    depends_on:
+      litellm:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8081/healthz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s

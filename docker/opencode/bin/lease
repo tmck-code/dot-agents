@@ -1,0 +1,198 @@
+#!/usr/bin/env bash
+# Host-side lease CLI for the OpenCode security stack.
+#
+#   lease approve --session ses_123 --repo owner/repo --ttl 8h
+#   lease list
+#   lease revoke lease_abcd1234
+#   lease self                  # uses LEASE_TOKEN/BROKER_URL (agent-side)
+#   lease token github          # print a token for debugging
+#
+# Admin calls go to the host-only listener (127.0.0.1:8081 by default) and
+# need LEASE_ADMIN_TOKEN or the token file below. The lease token is written to
+# ~/.local/state/opencode/lease-token with 0600 permissions.
+set -euo pipefail
+
+ADMIN_URL="${LEASE_ADMIN_URL:-http://127.0.0.1:8081}"
+ADMIN_TOKEN_FILE="${LEASE_ADMIN_TOKEN_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode/lease-admin.token}"
+STATE_TOKEN_FILE="${LEASE_TOKEN_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/opencode/lease-token}"
+BROKER_URL="${BROKER_URL:-http://127.0.0.1:8081}"
+
+die() { echo "lease: $*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage:
+  lease approve --session ID --service github|litellm|all [options]
+  lease create ...            # alias for approve
+  lease list
+  lease revoke LEASE_ID
+  lease self
+  lease token github|litellm
+
+approve options:
+  --session ID        Session identifier recorded on the lease (required)
+  --service NAME      github, litellm or all (default: all)
+  --repo OWNER/REPO   Repository scope; repeatable (required for github)
+  --action NAME       Permission, e.g. contents:read; repeatable or comma-separated
+  --ttl DURATION      8h, 30m, 3600 (default: broker default, 8h)
+  --model NAME        LiteLLM model alias; repeatable or comma-separated
+  --budget USD        Per-lease LiteLLM budget
+  --no-write          Do not write the lease token to the state file
+
+Environment:
+  LEASE_ADMIN_URL, LEASE_ADMIN_TOKEN, LEASE_ADMIN_TOKEN_FILE,
+  LEASE_TOKEN_FILE, BROKER_URL, LEASE_TOKEN
+EOF
+}
+
+admin_token() {
+  if [[ -n "${LEASE_ADMIN_TOKEN:-}" ]]; then
+    printf '%s' "$LEASE_ADMIN_TOKEN"
+    return
+  fi
+  if [[ -f "$ADMIN_TOKEN_FILE" ]]; then
+    tr -d '\r\n' < "$ADMIN_TOKEN_FILE"
+    return
+  fi
+  die "no admin token: set LEASE_ADMIN_TOKEN or create $ADMIN_TOKEN_FILE"
+}
+
+parse_ttl() {
+  local value="$1"
+  if [[ "$value" =~ ^[0-9]+$ ]]; then
+    printf '%s' "$value"
+  elif [[ "$value" =~ ^([0-9]+)([smhd])$ ]]; then
+    local n="${BASH_REMATCH[1]}"
+    case "${BASH_REMATCH[2]}" in
+      s) printf '%s' "$n" ;;
+      m) printf '%s' "$((n * 60))" ;;
+      h) printf '%s' "$((n * 3600))" ;;
+      d) printf '%s' "$((n * 86400))" ;;
+    esac
+  else
+    die "invalid --ttl: $value (use 30m, 8h or seconds)"
+  fi
+}
+
+split_items() {
+  local raw="$1"
+  local IFS=','
+  local item
+  for item in $raw; do
+    item="$(printf '%s' "$item" | xargs)"
+    [[ -n "$item" ]] && printf '%s\n' "$item"
+  done
+}
+
+json_array() {
+  if (($# == 0)); then
+    printf '[]'
+    return
+  fi
+  printf '%s\n' "$@" | jq -R . | jq -s .
+}
+
+cmd_approve() {
+  local session="" service="all" ttl="" budget="" write_token=1
+  local -a repos=() actions=() models=()
+  while (($#)); do
+    case "$1" in
+      --session) session="${2:?--session needs a value}"; shift 2 ;;
+      --service) service="${2:?--service needs a value}"; shift 2 ;;
+      --repo) repos+=("${2:?--repo needs a value}"); shift 2 ;;
+      --action) mapfile -t _items < <(split_items "${2:?--action needs a value}"); actions+=("${_items[@]}"); shift 2 ;;
+      --actions) mapfile -t _items < <(split_items "${2:?--actions needs a value}"); actions+=("${_items[@]}"); shift 2 ;;
+      --ttl) ttl="${2:?--ttl needs a value}"; shift 2 ;;
+      --model) mapfile -t _items < <(split_items "${2:?--model needs a value}"); models+=("${_items[@]}"); shift 2 ;;
+      --models) mapfile -t _items < <(split_items "${2:?--models needs a value}"); models+=("${_items[@]}"); shift 2 ;;
+      --budget) budget="${2:?--budget needs a value}"; shift 2 ;;
+      --no-write) write_token=0; shift ;;
+      -h|--help) usage; exit 0 ;;
+      *) die "unknown approve option: $1" ;;
+    esac
+  done
+  [[ -n "$session" ]] || die "approve needs --session"
+
+  ((${#actions[@]})) || actions=("contents:read")
+  local ttl_seconds=""
+  [[ -n "$ttl" ]] && ttl_seconds="$(parse_ttl "$ttl")"
+
+  local body
+  body="$(jq -n \
+    --arg session "$session" \
+    --arg service "$service" \
+    --argjson resources "$(json_array "${repos[@]}")" \
+    --argjson actions "$(json_array "${actions[@]}")" \
+    --argjson models "$(json_array "${models[@]}")" \
+    --arg ttl "${ttl_seconds}" \
+    --arg budget "$budget" \
+    '{
+      session: $session,
+      service: $service,
+      resources: $resources,
+      actions: $actions,
+      models: $models
+    }
+    + (if $ttl == "" then {} else {ttl_seconds: ($ttl | tonumber)} end)
+    + (if $budget == "" then {} else {budget_usd: ($budget | tonumber)} end)')"
+
+  local response
+  response="$(curl -fsS --max-time 15 \
+    -X POST "$ADMIN_URL/v1/leases" \
+    -H "Content-Type: application/json" \
+    -H "X-Admin-Token: $(admin_token)" \
+    -d "$body")" || die "could not create lease (is the stack running?)"
+
+  local token
+  token="$(jq -r '.lease_token // empty' <<<"$response")"
+  if ((write_token)) && [[ -n "$token" ]]; then
+    mkdir -p "$(dirname "$STATE_TOKEN_FILE")"
+    umask 077
+    printf '%s\n' "$token" > "$STATE_TOKEN_FILE"
+    chmod 600 "$STATE_TOKEN_FILE"
+    echo "lease: wrote lease token to $STATE_TOKEN_FILE" >&2
+  fi
+  jq '{lease_id, session, service, resources, actions, models, budget_usd, expires_at, lease_token}' <<<"$response"
+}
+
+cmd_list() {
+  curl -fsS --max-time 15 \
+    -H "X-Admin-Token: $(admin_token)" \
+    "$ADMIN_URL/v1/leases" | jq .
+}
+
+cmd_revoke() {
+  local lease_id="${1:-}"
+  [[ -n "$lease_id" ]] || die "revoke needs a lease id"
+  curl -fsS --max-time 15 \
+    -X POST "$ADMIN_URL/v1/leases/$lease_id/revoke" \
+    -H "X-Admin-Token: $(admin_token)" | jq .
+}
+
+cmd_self() {
+  : "${LEASE_TOKEN:?LEASE_TOKEN is not set}"
+  curl -fsS --max-time 15 \
+    -H "Authorization: Bearer $LEASE_TOKEN" \
+    "$BROKER_URL/v1/leases/self" | jq .
+}
+
+cmd_token() {
+  local service="${1:-}"
+  [[ "$service" == github || "$service" == litellm ]] || die "token needs github or litellm"
+  : "${LEASE_TOKEN:?LEASE_TOKEN is not set}"
+  curl -fsS --max-time 15 \
+    -H "Authorization: Bearer $LEASE_TOKEN" \
+    "$BROKER_URL/v1/token/$service" | jq .
+}
+
+command="${1:-}"
+[[ $# -gt 0 ]] && shift
+case "$command" in
+  approve|create) cmd_approve "$@" ;;
+  list|ls) cmd_list "$@" ;;
+  revoke) cmd_revoke "$@" ;;
+  self) cmd_self "$@" ;;
+  token) cmd_token "$@" ;;
+  -h|--help|help|"") usage ;;
+  *) die "unknown command: $command (try --help)" ;;
+esac
