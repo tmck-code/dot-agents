@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Plans and delegates a multi-file coding task to `worker` agents, then runs one verification pass. Use it when the task needs more than one worker, touches more than about 3 files, or needs a check-and-fix loop. Do NOT use it for a 1-2 file change with a known location (spawn `worker` directly), or for OpenSpec changes (use spec-author / spec-implementer).
+description: "Plans a multi-file coding task, delegates it to workers, runs one verification pass."
 tools: Read, Write, Bash, Grep, Glob, Skill, Agent
 model: opus
 effort: low

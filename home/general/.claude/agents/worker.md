@@ -1,6 +1,6 @@
 ---
 name: worker
-description: Implements one well-scoped piece of work from a brief (owned files, `path:line` addresses, invariants), or runs the verification gate when the brief says so. Spawned by an orchestrator or the main thread. Cannot start other agents.
+description: "Implements one scoped brief (owned files, path:line, invariants) or runs a gate. Cannot spawn agents."
 tools: Read, Edit, Write, Bash, Grep, Glob, Skill
 model: sonnet
 ---

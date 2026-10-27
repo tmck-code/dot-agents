@@ -1,6 +1,6 @@
 ---
 name: Explore
-description: Read-only search agent for broad fan-out searches — when answering means sweeping many files, directories, or naming conventions and you only need the conclusion, not the file dumps. It reads excerpts rather than whole files, so it locates code; it doesn't review or audit it. Specify search breadth: "medium" for moderate exploration, "very thorough" for multiple locations and naming conventions.
+description: "Read-only fan-out search; returns conclusions, not file dumps. State breadth: medium or very thorough."
 tools: [Bash, Glob, Grep, Read, Write, NotebookRead, TodoWrite, WebFetch, WebSearch, ToolSearch]
 model: sonnet
 effort: low
