@@ -227,6 +227,8 @@ __marimo__/
 
 # OpenCode secure stack: host-side secrets and runtime state
 docker/opencode/stack/secrets/
+docker/opencode/stack/models/
+*.gguf
 docker/opencode/stack/*.db
 docker/opencode/stack/*.log
 secrets.enc.yaml

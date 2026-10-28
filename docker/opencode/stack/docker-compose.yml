@@ -57,7 +57,7 @@ x-broker: &broker
     GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
     LITELLM_URL: http://litellm:4000
     LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
-    LITELLM_MODELS: ${LITELLM_MODELS:-claude-sonnet,claude-opus,gpt-mini,deepseek-chat}
+    LITELLM_MODELS: ${LITELLM_MODELS:-claude-sonnet,claude-opus,gpt-mini,deepseek-chat,qwen-local}
 
 services:
   squid:
@@ -123,6 +123,62 @@ services:
       retries: 12
       start_period: 10s
 
+  # Optional local model. Profile-gated so the base stack and tests do not
+  # need a 2.5 GB GGUF or a GPU. Only LiteLLM joins this service: the agent is
+  # not on opencode-data and cannot reach llama:8080.
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server@sha256:d880b2a0e478795ce99d0a275732f5a50e579cb234ae7d2d3815afc909fd02f2
+    container_name: opencode-llama
+    profiles: ["llama"]
+    restart: unless-stopped
+    networks:
+      - opencode-data
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=512m
+    user: "${LLAMA_UID:-1000}:${LLAMA_GID:-1000}"
+    init: true
+    pids_limit: ${LLAMA_PIDS_LIMIT:-512}
+    mem_limit: ${LLAMA_MEMORY:-6g}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      - ${LLAMA_MODEL_PATH:-./models/model.gguf}:/models/model.gguf:ro
+    environment:
+      HOME: /tmp
+      LLAMA_API_KEY: ${LLAMA_API_KEY:-sk-llama-local}
+      LLAMA_CTX_SIZE: ${LLAMA_CTX_SIZE:-65536}
+      LLAMA_N_GPU_LAYERS: ${LLAMA_N_GPU_LAYERS:-0}
+    # The shell defers $${...} expansion to container start, so the GPU
+    # override can raise LLAMA_N_GPU_LAYERS without duplicating the command.
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - |
+        exec /app/llama-server \
+          --model /models/model.gguf \
+          --alias qwen3.5-4b \
+          --host 0.0.0.0 \
+          --port 8080 \
+          --ctx-size "$${LLAMA_CTX_SIZE:-65536}" \
+          --parallel 1 \
+          --n-gpu-layers "$${LLAMA_N_GPU_LAYERS:-0}" \
+          --flash-attn on \
+          --cache-type-k q8_0 \
+          --cache-type-v q8_0 \
+          --jinja \
+          --no-webui \
+          --api-key "$${LLAMA_API_KEY}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+
   litellm:
     image: ghcr.io/berriai/litellm:main-stable@sha256:c169fb3adc514fcf210377c203f3de406d54f10bfdacf13948a4a839db9af7de
     container_name: opencode-litellm
@@ -143,6 +199,7 @@ services:
       HOME: /tmp
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       LITELLM_DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm-local}@postgres:5432/litellm
+      LLAMA_API_KEY: ${LLAMA_API_KEY:-sk-llama-local}
     depends_on:
       postgres:
         condition: service_healthy

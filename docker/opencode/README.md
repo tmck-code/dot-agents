@@ -288,14 +288,15 @@ host ── docker compose ── broker (opencode-agent + opencode-egress)
 
                          opencode-data (internal: true)
                          ├── postgres     (LiteLLM key/spend state)
+                         ├── llama        (optional profile; only LiteLLM reaches it)
                          └── litellm
 ```
 
 Only Squid, LiteLLM and the broker join `opencode-egress`. The agent has no
-default route, no host gateway and no default bridge. Postgres is on a separate
-internal network reachable only by LiteLLM. Squid sees destinations,
-not bodies or headers. It does not terminate TLS, so no custom CA is installed
-in the agent.
+default route, no host gateway and no default bridge. Postgres and the optional
+llama.cpp runtime are on a separate internal network reachable only by LiteLLM.
+Squid sees destinations, not bodies or headers. It does not terminate TLS, so
+no custom CA is installed in the agent.
 
 ### First run
 
@@ -368,6 +369,109 @@ environment. Add
 providers in `stack/litellm.yaml` and keep the aliases in
 `config/opencode.jsonc` in sync. A revoked lease deletes the virtual key, so
 LiteLLM rejects further calls with it.
+
+### Local model (llama.cpp)
+
+The stack can serve a local Qwen3.5 4B through llama.cpp without giving the
+agent another route. The `llama` service is profile-gated and attached only to
+`opencode-data`; only LiteLLM can reach `http://llama:8080/v1`.
+
+The model is off by default, so the base stack continues to start without a
+GGUF or a GPU. The quickest path is one command:
+
+```bash
+cd ~/dev/dot-agents/docker/opencode
+make llama-up
+```
+
+`make llama-up` resolves the existing Ollama `qwen3.5:4b` blob, auto-detects an
+NVIDIA GPU (use `LLAMA_GPU=0 make llama-up` for CPU), starts the profile, waits
+for health, and approves a `qwen-local` lease using the admin token from
+`stack/secrets/stack.env` or `LEASE_ADMIN_TOKEN`.
+
+Useful lifecycle commands:
+
+```bash
+make llama-status      # container, health, context and GPU memory
+make llama-logs        # follow llama.cpp logs
+make llama-lease       # approve another qwen-local lease
+make llama-down        # stop only llama; leave the rest of the stack running
+```
+
+The same workflow is available directly:
+
+```bash
+./stack/llama.sh up                 # start + approve a lease
+./stack/llama.sh up --no-lease      # start only
+./stack/llama.sh lease              # approve another lease
+./stack/llama.sh status
+./stack/llama.sh logs
+./stack/llama.sh down
+```
+
+Manual alternatives, if you want to control the compose invocation:
+
+```bash
+eval "$(./stack/llama-model.sh --export)"     # qwen3.5:4b model.gguf blob
+./stack/llama-model.sh --projector            # optional, vision follow-up
+
+# GPU host (RTX 3070 Ti; ~5.2 GB at 64K):
+docker compose -f stack/docker-compose.yml \
+  -f stack/docker-compose.llama-gpu.yml \
+  --profile llama up -d --wait
+
+# CPU-only host:
+docker compose -f stack/docker-compose.yml --profile llama up -d --wait
+```
+
+A standalone GGUF works the same way:
+
+```bash
+export LLAMA_MODEL_PATH=/path/to/qwen3.5-4b.Q4_K_M.gguf
+make llama-up
+```
+
+`stack/models/` and `*.gguf` are git-ignored. The default path is
+`stack/models/model.gguf`; it is only read when the `llama` profile is enabled.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `LLAMA_MODEL_PATH` | `./models/model.gguf` | Read-only GGUF mount |
+| `LLAMA_CTX_SIZE` | `65536` | Context per slot; set `32768` for the old Ollama-sized fallback |
+| `LLAMA_N_GPU_LAYERS` | `0` base, `99` GPU override | Layers offloaded to the GPU |
+| `LLAMA_UID` / `LLAMA_GID` | `1000` / `1000` | Container user; must be able to read the GGUF |
+| `LLAMA_MEMORY` | `6g` | Container memory limit |
+| `LLAMA_PIDS_LIMIT` | `512` | Container PID limit |
+| `LLAMA_API_KEY` | `sk-llama-local` | Shared key between llama.cpp and LiteLLM; never given to the agent |
+
+The runtime uses one slot (`--parallel 1`), flash attention, `q8_0` KV cache and
+the model's Jinja template, which keeps tool calls working. Thinking stays on by
+default; a request can pass `chat_template_kwargs: {enable_thinking: false}` to
+suppress it for that call.
+
+`make llama-up` already approves a model-only lease. To approve another one
+manually:
+
+```bash
+./bin/lease approve --session "$USER-local" --service litellm \
+  --model qwen-local --ttl 1h
+
+# inside OpenCode
+/model litellm/qwen-local
+```
+
+`litellm/claude-sonnet` remains the default. The local model is opt-in.
+
+**Rollback:** select `/model litellm/claude-sonnet`, revoke the `qwen-local`
+lease, then stop the optional service:
+
+```bash
+./bin/lease revoke <lease_id>
+make llama-down
+```
+
+Cloud aliases keep working without restarting LiteLLM. The profile can be left
+stopped indefinitely.
 
 ### Squid limitations
 
@@ -445,7 +549,7 @@ The stack is additive. To return to the legacy runtime:
 
 To use the previous image tag, set `IMAGE=<old-tag>` and run with `--unsafe`.
 `docker compose -f stack/docker-compose.yml down` stops the stack; named volumes
-(`opencode-broker-state`, `opencode-squid-logs`, `opencode-litellm-data`) are
+(`opencode-broker-state`, `opencode-squid-logs`, `opencode-litellm-db` and the optional model volumes) are
 left intact. The host `~/.config/opencode` and `~/.claude` are never modified by
 the secure stack.
 

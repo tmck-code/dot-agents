@@ -21,6 +21,13 @@ model_list:
     litellm_params:
       model: deepseek/deepseek-chat
       api_key: os.environ/DEEPSEEK_API_KEY
+  # Optional local model. The profile can be down while LiteLLM is healthy;
+  # only calls to this alias fail until llama is started.
+  - model_name: qwen-local
+    litellm_params:
+      model: openai/qwen3.5-4b
+      api_base: http://llama:8080/v1
+      api_key: os.environ/LLAMA_API_KEY
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

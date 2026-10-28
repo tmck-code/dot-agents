@@ -41,7 +41,9 @@ PUBLISH_BUILD_ARGS = \
 	--build-arg PYTHON_VERSION=$(PYTHON_VERSION)
 
 .PHONY: build run shell test test-legacy test-hardening test-egress test-stack \
-	test-broker test-guardrails test-worktree test-unsafe test-no-secrets test-all build-multi clean help
+	test-broker test-guardrails test-worktree test-unsafe test-no-secrets \
+	test-llama-config test-llama llama-up llama-lease llama-status llama-logs llama-down \
+	test-all build-multi clean help
 
 ## build: build for this host's architecture and load it into Docker
 build:
@@ -86,9 +88,9 @@ test-stack:
 
 ## test-broker: pytest coverage for leases, expiry, revocation and logging
 test-broker:
-	docker run --rm -v "$(CURDIR)/broker:/app" -w /app -e PYTHONPATH=/app \
+	docker run --rm -v "$(CURDIR)/broker:/app/broker" -w /app -e PYTHONPATH=/app \
 		python:3.12-slim@sha256:12316debbfb86890f6b2d825820612741ba527ad5a44e3902759141d572bfe8f \
-		sh -c 'pip install --quiet -r requirements-dev.txt && pytest -q tests'
+		sh -c 'pip install --quiet -r /app/broker/requirements-dev.txt && pytest -q /app/broker/tests'
 
 ## test-guardrails: protected paths, external directories and audit redaction
 test-guardrails:
@@ -106,8 +108,37 @@ test-unsafe:
 test-no-secrets:
 	IMAGE=$(IMAGE) ./test/no-secrets.sh
 
+## test-llama-config: static checks for the optional local model (no model/GPU)
+test-llama-config:
+	./test/llama-config.sh
+
+## test-llama: opt-in real-model smoke test (needs LLAMA_MODEL_PATH)
+test-llama:
+	LLAMA_MODEL_PATH="$(LLAMA_MODEL_PATH)" LLAMA_GPU="$(LLAMA_GPU)" \
+		IMAGE=$(IMAGE) ./test/llama-smoke.sh
+
+## llama-up: resolve qwen3.5, start the llama profile and approve a lease
+llama-up:
+	./stack/llama.sh up
+
+## llama-lease: approve another lease for qwen-local
+llama-lease:
+	./stack/llama.sh lease
+
+## llama-status: show the llama container, health and context
+llama-status:
+	./stack/llama.sh status
+
+## llama-logs: follow llama.cpp logs
+llama-logs:
+	./stack/llama.sh logs
+
+## llama-down: stop the llama service, leave the rest of the stack up
+llama-down:
+	./stack/llama.sh down
+
 ## test-all: every suite that does not need a running production lease
-test-all: test-legacy test-hardening test-broker test-guardrails test-worktree test-unsafe
+test-all: test-legacy test-hardening test-broker test-guardrails test-worktree test-unsafe test-llama-config
 
 # usage: make build-multi PUSH_IMAGE=registry.example.com/you/opencode-dev:2.1.4
 ## build-multi: build amd64+arm64 with SBOM/provenance and push (UID/GID 1000:1000)

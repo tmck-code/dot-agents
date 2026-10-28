@@ -233,3 +233,23 @@ def test_scope_metadata_reflects_expiry(clients):
     self_view = agent.get("/v1/leases/self", headers=_auth(lease["lease_token"]))
     assert self_view.status_code == 200
     assert self_view.json()["service"] == "github"
+
+
+def test_qwen_local_lease_passes_model_allowlist(clients, monkeypatch):
+    admin, _, _ = clients
+    calls: list[dict] = []
+
+    def fake_create(**kwargs):
+        calls.append(kwargs)
+        return "sk-qwen-local"
+
+    monkeypatch.setattr(litellm, "create_virtual_key", fake_create)
+    lease = _create(
+        admin,
+        service="litellm",
+        resources=[],
+        models=["qwen-local"],
+    )
+    assert lease["models"] == ["qwen-local"]
+    assert calls and calls[0]["models"] == ["qwen-local"]
+    assert calls[0]["lease_id"] == lease["lease_id"]

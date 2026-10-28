@@ -1,0 +1,13 @@
+# GPU override for the optional local llama.cpp model.
+#
+#   docker compose -f stack/docker-compose.yml \
+#     -f stack/docker-compose.llama-gpu.yml --profile llama up -d
+#
+# The base file stays CPU-only. This override selects the pinned CUDA image,
+# exposes the NVIDIA devices and raises the default GPU-layer count.
+services:
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:59633c1493f104de906b83a2588e9b44714ef2db0c9d7efbf01495dd5447e425
+    gpus: all
+    environment:
+      LLAMA_N_GPU_LAYERS: ${LLAMA_N_GPU_LAYERS:-99}
