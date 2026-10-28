@@ -77,15 +77,43 @@ resolve_model() {
   echo "llama: model $LLAMA_MODEL_PATH"
 }
 
-load_admin_token() {
-  if [[ -z "${LEASE_ADMIN_TOKEN:-}" && -f stack/secrets/stack.env ]]; then
-    # shellcheck disable=SC1091
-    set -a
-    . stack/secrets/stack.env
-    set +a
-    export LEASE_ADMIN_TOKEN="${LEASE_ADMIN_TOKEN:-${BROKER_ADMIN_TOKEN:-}}"
+set_env_value() {
+  local key="$1" value="$2" file="stack/secrets/stack.env"
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    printf '%s=%s\n' "$key" "$value" >> "$file"
   fi
-  export LEASE_ADMIN_TOKEN="${LEASE_ADMIN_TOKEN:-}"
+}
+
+ensure_stack_env() {
+  local file="stack/secrets/stack.env"
+  mkdir -p stack/secrets
+  chmod 700 stack/secrets
+  if [[ -f "$file" ]]; then
+    # shellcheck disable=SC1090
+    set -a
+    . "$file"
+    set +a
+  else
+    umask 077
+    : > "$file"
+    chmod 600 "$file"
+  fi
+  if [[ -z "${BROKER_ADMIN_TOKEN:-}" ]]; then
+    BROKER_ADMIN_TOKEN="$(openssl rand -hex 32)"
+    set_env_value BROKER_ADMIN_TOKEN "$BROKER_ADMIN_TOKEN"
+  fi
+  if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
+    LITELLM_MASTER_KEY="sk-$(openssl rand -hex 32)"
+    set_env_value LITELLM_MASTER_KEY "$LITELLM_MASTER_KEY"
+  fi
+  export BROKER_ADMIN_TOKEN LITELLM_MASTER_KEY
+  export LEASE_ADMIN_TOKEN="${LEASE_ADMIN_TOKEN:-$BROKER_ADMIN_TOKEN}"
+}
+
+load_admin_token() {
+  ensure_stack_env
 }
 
 approve_lease() {
@@ -119,6 +147,7 @@ cmd_up() {
   local gpu
   gpu="$(detect_gpu)"
   resolve_model
+  ensure_stack_env
   echo "llama: starting with LLAMA_GPU=$gpu LLAMA_CTX_SIZE=${LLAMA_CTX_SIZE:-65536}"
   local args=("${BASE[@]}" --profile llama)
   ((gpu)) && args+=("${GPU_OVERRIDE[@]}")
@@ -131,6 +160,7 @@ cmd_up() {
 }
 
 cmd_lease() {
+  ensure_stack_env
   approve_lease
 }
 

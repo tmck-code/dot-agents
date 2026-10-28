@@ -389,6 +389,12 @@ NVIDIA GPU (use `LLAMA_GPU=0 make llama-up` for CPU), starts the profile, waits
 for health, and approves a `qwen-local` lease using the admin token from
 `stack/secrets/stack.env` or `LEASE_ADMIN_TOKEN`.
 
+On first use it creates `stack/secrets/stack.env` (mode 0600) with a generated
+`BROKER_ADMIN_TOKEN` and `LITELLM_MASTER_KEY` when they are missing. This is why
+`make llama-up` works without a separate secrets setup; LiteLLM refuses an
+empty master key by design. Reuse the same file for subsequent starts, or run
+`scripts/opencode-secrets.sh` if you keep secrets in SOPS/KeePassXC.
+
 Useful lifecycle commands:
 
 ```bash
