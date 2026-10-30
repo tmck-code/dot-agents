@@ -42,6 +42,10 @@
     { "action": "integration.use", "resource": "plugin:/etc/opencode/plugins/guard.ts", "effect": "allow" },
     { "action": "integration.use", "resource": "plugin:/etc/opencode/plugins/audit.ts", "effect": "allow" },
     { "action": "integration.use", "resource": "plugin:/etc/opencode/plugins/lease.ts", "effect": "allow" },
+    // User-level hook bridge: Python hooks stay the single source of truth.
+    // Both the config symlink path and the repo target can be the plugin path.
+    { "action": "integration.use", "resource": "plugin:/home/agent/.config/opencode/plugins/claude-hooks.ts", "effect": "allow" },
+    { "action": "integration.use", "resource": "plugin:/home/freman/dev/dot-agents/home/general/.config/opencode/plugins/claude-hooks.ts", "effect": "allow" },
     { "action": "integration.use", "resource": "mcp:*", "effect": "deny" },
     // Skills are data, but they can steer the agent; allow discovery and audit
     // their use. Untrusted work should deny this action as well.

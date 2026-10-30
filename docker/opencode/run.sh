@@ -459,6 +459,7 @@ with urllib.request.urlopen(request, timeout=10) as response:
     --env LITELLM_API_KEY="$LITELLM_API_KEY"
     --env LITELLM_BASE_URL="$LITELLM_BASE_URL"
     --env EXCALIDRAW_RENDER_URL="http://excalidraw:8080"
+    --env OPENCODE_CONTAINER=1
     --env OPENCODE_WORKSPACE="$REPO_ROOT"
     --env OPENCODE_AUDIT_LOG=/var/log/opencode/audit.jsonl
     --env GIT_TERMINAL_PROMPT=0

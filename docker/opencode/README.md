@@ -581,6 +581,37 @@ Squid access log (`opencode-squid-logs` volume) and the broker's issuance events
 are the authoritative records. Neither logs request bodies, headers or token
 values.
 
+### Claude Code hooks in OpenCode
+
+OpenCode does not read `.claude/settings.json` or invoke `.claude/hooks/*.py`
+directly. The Python hooks remain the single source of truth, and a bridge
+plugin at `~/.config/opencode/plugins/claude-hooks.ts` translates OpenCode
+events into the Claude Code stdin/JSON contract:
+
+- `UserPromptSubmit` → `ctx.session.hook("prompt")`
+- `PreToolUse` → `ctx.tool.hook("execute.before")` (throws on deny)
+- `PostToolUse` → `ctx.tool.hook("execute.after")`
+- `PreCompact` → `ctx.session.hook("compaction")`
+- `SubagentStop` → the subagent session's terminal event
+
+It handles both blocking styles: exit 2 + stderr, and exit 0 + JSON
+`permissionDecision: "deny"`. `additionalContext` is queued and appended to the
+session's next model call. Tool names are mapped back to Claude names
+(`shell`→`Bash`, `edit`/`write`→`Edit`/`Write`, `subagent`→`Agent`, etc.).
+
+The bridge is enabled for host OpenCode and the Docker agent. In the container
+the host-only `ban-host-npm.py` guard is skipped (npm inside the container is
+not the host risk it guards, and there is no Docker socket to redirect into).
+The other guards remain active.
+
+Because safe mode mounts `~/.claude` read-only, hooks that persist state under
+`$CLAUDE_CONFIG_DIR/hooks/state` may lose their state in the container; the
+blocking guards still work. OpenCode notifications are configured natively in
+`cli.json` (`attention.*`), not through `agent-notify.py`.
+
+To see hook invocations, set `OPENCODE_HOOKS_DEBUG=1`; the bridge writes
+`/tmp/claude-hooks.log`.
+
 ### Secrets
 
 Use SOPS+age as the primary store or a dedicated KeePassXC database as an
