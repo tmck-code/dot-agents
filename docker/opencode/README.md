@@ -301,23 +301,36 @@ no custom CA is installed in the agent.
 ### First run
 
 ```bash
+cd ~/dev/dot-agents/docker/opencode
+
 # 1. Build the image (digest-pinned bases; no secrets in the context).
 make build
 
-# 2. Resolve host-side secrets (SOPS+age or KeePassXC; see below).
+# 2. Start the stack, the local qwen3.5 model, and a qwen-local lease.
+#    This creates stack/secrets/stack.env with generated keys on first use.
+make llama-up
+
+# 3. Optional: start the Excalidraw renderer sidecar.
+make excalidraw-up
+
+# 4. Run OpenCode. The default model is litellm/qwen-local.
+make run
+```
+
+`make shell` opens the same container with bash instead of the TUI.
+
+If you keep secrets in SOPS+age or KeePassXC, resolve them before `make
+llama-up`:
+
+```bash
 ./scripts/opencode-secrets.sh --source sops --file secrets.enc.yaml \
     --keys GITHUB_APP_ID,LITELLM_MASTER_KEY,BROKER_ADMIN_TOKEN,ANTHROPIC_API_KEY
 
-# 3. Start the stack.
+# or use the generated stack.env:
 docker compose -f stack/docker-compose.yml \
     --env-file stack/secrets/stack.env up -d
-
-# 4. Approve a scoped lease (writes ~/.local/state/opencode/lease-token, 0600).
 ./bin/lease approve --session "$USER" --service all \
-    --repo owner/repo --model claude-sonnet --ttl 8h
-
-# 5. Run the agent. It fails closed if the stack or lease is missing.
-./run.sh
+    --repo owner/repo --model qwen-local --ttl 8h
 ```
 
 `./bin/lease list` shows active leases with scope and expiry. `./bin/lease
@@ -499,6 +512,13 @@ make excalidraw-down     # stop it
 It is profile-gated (`--profile tools`), attached only to `opencode-agent`, has
 no published port, and reaches `esm.sh` only through Squid. `esm.sh` is in the
 Squid allowlist. The sidecar has no Docker socket and no host mounts.
+
+Start it alongside the model stack, then open the agent shell:
+
+```bash
+make excalidraw-up
+make shell
+```
 
 Inside the agent shell:
 
