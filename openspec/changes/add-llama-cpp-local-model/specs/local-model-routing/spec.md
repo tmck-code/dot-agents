@@ -16,15 +16,23 @@ LiteLLM SHALL expose a `qwen-local` alias backed by `openai/qwen3.5-4b` at `http
 - **THEN** the cloud alias still succeeds and only `qwen-local` calls fail
 
 ### Requirement: OpenCode model catalogue entry
-The OpenCode system policy SHALL list `qwen-local` under the `litellm` provider with `limit.context: 65536` and `limit.output: 8192`, and the top-level default model SHALL remain `litellm/claude-sonnet`.
+The OpenCode system policy SHALL list `qwen-local` under the `litellm` provider with `limit.context: 65536` and `limit.output: 8192`, and the top-level default model SHALL be `litellm/qwen-local`. Cloud aliases MAY remain configured in LiteLLM but SHALL NOT be listed in the OpenCode `provider.litellm.models` map, so only `qwen-local` is offered by default.
 
 #### Scenario: Local model is selectable
 - **WHEN** the agent starts and the model catalogue is inspected
 - **THEN** `litellm/qwen-local` is available with a 65536-token context limit and an 8192-token output limit
 
-#### Scenario: Default model is unchanged
+#### Scenario: Local model is the default
 - **WHEN** the agent starts with no model override
-- **THEN** it uses `litellm/claude-sonnet`, not the local model
+- **THEN** it uses `litellm/qwen-local`
+
+#### Scenario: Cloud aliases are not listed by default
+- **WHEN** the agent starts with no model override
+- **THEN** the model picker lists `litellm/qwen-local` but none of the omitted cloud aliases
+
+#### Scenario: Cloud alias can be re-added
+- **WHEN** the operator adds a cloud alias back to `provider.litellm.models` and rebuilds
+- **THEN** that alias appears in the catalogue and still routes through LiteLLM
 
 #### Scenario: Context limit matches the server
 - **WHEN** the model is selected and a long conversation approaches the context limit

@@ -37,15 +37,15 @@ default for hosts and CI without a GPU.
 - Keep the model runtime hardened to the same standard as the other stack
   services: no published port, read-only mounts, dropped capabilities, resource
   limits.
-- Leave the default model and thinking behaviour unchanged.
+- Make qwen-local the default and only listed OpenCode model while leaving thinking behaviour unchanged; cloud aliases remain in LiteLLM but are omitted from the OpenCode catalogue.
 
 **Non-Goals:**
 
 - Vision or image input in the first slice. The `mmproj` projector is not
   mounted or passed to llama.cpp; the resolver can report its path for a
   follow-up change.
-- Auto-starting or auto-selecting the local model. Enabling the profile and
-  switching with `/model` stay explicit operator actions.
+- Auto-starting the local model. Enabling the profile stays an explicit operator
+  action, while the default model selection is static in OpenCode config.
 - Running the model on the agent network, publishing a host port, or exposing a
   llama.cpp web UI.
 - Downloading, converting or committing model weights. The change consumes an
@@ -188,19 +188,24 @@ continues to mint keys from the lease's explicit model list, falling back to
 lease without it is rejected by LiteLLM. The broker code, store and admin API do
 not change.
 
-### OpenCode model entry without changing the default
+### OpenCode model entry is the default
 
 `config/opencode.jsonc` adds `qwen-local` under `provider.litellm.models` with
-`name` and `limit: {context: 65536, output: 8192}`. The existing cloud aliases
-keep their current shape. The top-level `"model"` stays `litellm/claude-sonnet`,
-so the local model is opt-in via `/model litellm/qwen-local`. Thinking remains
-enabled; the README documents
+`name` and `limit: {context: 65536, output: 8192}`, and changes the top-level
+`"model"` to `litellm/qwen-local`. This branch exists to run the local model, so
+making it the default is the intended behaviour; cloud aliases such as
+`litellm/claude-sonnet` stay in LiteLLM but are omitted from the OpenCode
+`provider.litellm.models` map, so only `qwen-local` is listed. Re-enable a
+cloud alias by adding its entry back. Thinking remains enabled; the README
+documents
 `chat_template_kwargs: {enable_thinking: false}` for a per-request opt-out.
 
-Alternative considered: make the local model the default when the profile is
-up. Rejected: OpenCode config is static, the profile is a host-side choice, and
-silently downgrading model quality would violate the "cloud remains default"
-intent.
+Because OpenCode config is static and the llama profile is host-side, the
+default points at an unavailable alias when the profile is down. `make
+llama-up` is the supported start path; callers that only want cloud models can
+stop the profile and select a cloud alias explicitly. The alternative — keeping
+claude-sonnet as the default and making the local model opt-in — was rejected
+by the user because it defeats the purpose of the change.
 
 ### Health, hardening and required-service independence
 
@@ -249,10 +254,10 @@ to `create_virtual_key` unchanged. No broker logic changes.
 - **Model blob permissions versus the container UID** → run as
   `${LLAMA_UID:-1000}:${LLAMA_GID:-1000}`, have the resolver warn when the blob
   is unreadable, and document `LLAMA_UID`/`LLAMA_GID` overrides.
-- **LiteLLM advertises `qwen-local` while the profile is down** → calls return
-  an upstream error; LiteLLM itself stays healthy and cloud aliases keep
-  working. The README says to enable the profile before approving a
-  `qwen-local` lease.
+- **Default model points at `qwen-local` while the profile is down** → the
+  default calls fail; LiteLLM itself stays healthy and cloud aliases keep
+  working if re-added to the OpenCode catalogue. The README says to start
+  `make llama-up` before OpenCode.
 - **Lease scoped to `qwen-local` after the model stops** → the lease remains
   valid but model calls fail until the profile is restarted; no credential is
   exposed.
@@ -270,16 +275,17 @@ to `create_virtual_key` unchanged. No broker logic changes.
 
 1. Land the service, resolver, gitignore and static tests with the profile
    disabled. Existing stacks are unchanged.
-2. Add the LiteLLM alias, broker default and OpenCode model entry. Cloud
-   aliases and the default model still work; `qwen-local` fails only when
-   called without the profile.
+2. Add the LiteLLM alias, broker default and OpenCode model entry, and make
+   `litellm/qwen-local` the default. Start the profile before OpenCode; cloud
+   aliases remain selectable with `/model`.
 3. On a GPU host, resolve the Ollama blob, start
    `--profile llama` with the GPU override, approve a lease with
    `--model qwen-local`, and select `/model litellm/qwen-local`.
 4. Roll back by selecting `/model litellm/claude-sonnet`, revoking the
    `qwen-local` lease, and running `docker compose ... --profile llama stop
-   llama`. Removing the service and alias is additive-safe because no other
-   service depends on `llama`.
+   llama`. To use a cloud model again, add it back to `provider.litellm.models`
+   and set the top-level `model` back to `litellm/claude-sonnet`. Removing the service and alias is additive-safe
+   because no other service depends on `llama`.
 
 ## Open Questions
 

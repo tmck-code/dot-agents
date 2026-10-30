@@ -47,6 +47,13 @@ grep -q '"context": 65536' config/opencode.jsonc \
   || fail "OpenCode qwen-local context must be 65536"
 grep -q '"output": 8192' config/opencode.jsonc \
   || fail "OpenCode qwen-local output must be 8192"
+grep -q '"model": "litellm/qwen-local"' config/opencode.jsonc \
+  || fail "qwen-local must be the default OpenCode model"
+for model in claude-sonnet claude-opus gpt-mini deepseek-chat; do
+  if grep -q "\"$model\":" config/opencode.jsonc; then
+    fail "non-local model $model must not be listed in the OpenCode catalogue"
+  fi
+done
 [[ -x stack/llama.sh ]] || fail "stack/llama.sh must be executable"
 grep -q '^llama-up:' Makefile || fail "Makefile llama-up target missing"
 grep -q '^llama-down:' Makefile || fail "Makefile llama-down target missing"

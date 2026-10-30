@@ -28,7 +28,7 @@
 
 - [x] 4.1 Append a `qwen-local` entry to `model_list` in `docker/opencode/stack/litellm.yaml` with `litellm_params.model: openai/qwen3.5-4b`, `api_base: http://llama:8080/v1`, and `api_key: os.environ/LLAMA_API_KEY`.
 - [x] 4.2 Change the `broker` service `LITELLM_MODELS` default in `docker/opencode/stack/docker-compose.yml` from `claude-sonnet,claude-opus,gpt-mini,deepseek-chat` to `claude-sonnet,claude-opus,gpt-mini,deepseek-chat,qwen-local`; leave `broker/settings.py` parsing unchanged.
-- [x] 4.3 Add `"qwen-local": { "name": "Qwen3.5 4B (local, via LiteLLM)", "limit": { "context": 65536, "output": 8192 } }` to `provider.litellm.models` in `docker/opencode/config/opencode.jsonc`; leave the other entries and the top-level `"model": "litellm/claude-sonnet"` unchanged.
+- [x] 4.3 Add `"qwen-local": { "name": "Qwen3.5 4B (local, via LiteLLM)", "limit": { "context": 65536, "output": 8192 } }` to `provider.litellm.models` in `docker/opencode/config/opencode.jsonc`, set the top-level `"model"` to `"litellm/qwen-local"`, and omit every cloud alias from the OpenCode model map so only the local model is listed.
 - [x] 4.4 Confirm `docker/opencode/config/opencode.jsonc` still allows only the `litellm` provider and that no new provider or `LLAMA_API_KEY` reference was added to it.
 
 ## 5. Tests
@@ -47,8 +47,8 @@
 - [x] 6.1 Add `llama` to the "Secure stack" topology diagram in `docker/opencode/README.md` under `opencode-data`, with a note that only LiteLLM reaches it.
 - [x] 6.2 Add a "Local model (llama.cpp)" subsection covering: resolving the Ollama blob with `stack/llama-model.sh --export`, standalone GGUF via `LLAMA_MODEL_PATH`, `--profile llama` with and without the GPU override, and that the RTX 3070 Ti uses about 5.2 GB at 64K.
 - [x] 6.3 Document `LLAMA_CTX_SIZE`, `LLAMA_N_GPU_LAYERS`, `LLAMA_UID`/`LLAMA_GID`, `LLAMA_MEMORY`, the 32K fallback versus the previous Ollama 32K setting, and the git-ignored `stack/models/` directory.
-- [x] 6.4 Document operator flow: start the profile, approve a lease with `--model qwen-local`, select `/model litellm/qwen-local`, keep `litellm/claude-sonnet` as default, and note that thinking is on with `chat_template_kwargs: {enable_thinking: false}` as a per-request opt-out.
-- [x] 6.5 Document rollback: switch back to `litellm/claude-sonnet`, revoke the `qwen-local` lease, run `docker compose ... --profile llama stop llama`, and confirm cloud aliases need no restart.
+- [x] 6.4 Document operator flow: start the profile, approve a lease with `--model qwen-local`, use `litellm/qwen-local` as the default and only listed model, explain how to add a cloud alias back, and note that thinking is on with `chat_template_kwargs: {enable_thinking: false}` as a per-request opt-out.
+- [x] 6.5 Document rollback: add a cloud alias back to the OpenCode model map, switch the top-level model back to `litellm/claude-sonnet`, revoke the `qwen-local` lease, run `docker compose ... --profile llama stop llama`, and confirm LiteLLM needs no restart.
 - [x] 6.6 Add `docker/opencode/stack/llama.sh` with `up`/`lease`/`status`/`logs`/`down` subcommands and Makefile wrappers (`llama-up`, `llama-lease`, `llama-status`, `llama-logs`, `llama-down`), auto-resolving the Ollama GGUF and auto-detecting the GPU.
 
 ## 7. Validation

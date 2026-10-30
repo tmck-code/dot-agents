@@ -376,8 +376,9 @@ The stack can serve a local Qwen3.5 4B through llama.cpp without giving the
 agent another route. The `llama` service is profile-gated and attached only to
 `opencode-data`; only LiteLLM can reach `http://llama:8080/v1`.
 
-The model is off by default, so the base stack continues to start without a
-GGUF or a GPU. The quickest path is one command:
+The model runtime is profile-gated, so the base stack can start without a GGUF
+or a GPU. Because `litellm/qwen-local` is the default OpenCode model, start the
+local runtime before launching OpenCode. The quickest path is one command:
 
 ```bash
 cd ~/dev/dot-agents/docker/opencode
@@ -466,10 +467,16 @@ manually:
 /model litellm/qwen-local
 ```
 
-`litellm/claude-sonnet` remains the default. The local model is opt-in.
+`litellm/qwen-local` is the default and only listed OpenCode model. Cloud
+aliases such as `litellm/claude-sonnet` remain configured in LiteLLM but are
+omitted from `provider.litellm.models` in `config/opencode.jsonc`, so they do
+not appear in the model picker. Add the alias back to that map and rebuild the
+image to expose it again.
 
-**Rollback:** select `/model litellm/claude-sonnet`, revoke the `qwen-local`
-lease, then stop the optional service:
+**Rollback:** to use a cloud model again, add it back to
+`provider.litellm.models`, set the top-level `model` back to
+`litellm/claude-sonnet`, rebuild the image, and revoke the `qwen-local` lease.
+Then stop the optional service:
 
 ```bash
 ./bin/lease revoke <lease_id>
@@ -478,6 +485,47 @@ make llama-down
 
 Cloud aliases keep working without restarting LiteLLM. The profile can be left
 stopped indefinitely.
+
+### Excalidraw renderer (optional)
+
+The Excalidraw skill needs a Playwright/Chromium renderer. The agent container
+has no Docker socket, so the renderer runs as a separate optional sidecar:
+
+```bash
+make excalidraw-up       # builds and starts opencode-excalidraw
+make excalidraw-down     # stop it
+```
+
+It is profile-gated (`--profile tools`), attached only to `opencode-agent`, has
+no published port, and reaches `esm.sh` only through Squid. `esm.sh` is in the
+Squid allowlist. The sidecar has no Docker socket and no host mounts.
+
+Inside the agent shell:
+
+```bash
+excalidraw-render docs/diagrams/example.excalidraw \
+  -o docs/diagrams/example.png --transparent
+
+excalidraw-render docs/diagrams/example.excalidraw \
+  -o docs/diagrams/example.svg
+```
+
+The CLI posts to `EXCALIDRAW_RENDER_URL` (default `http://excalidraw:8080`).
+The API is also available directly from the agent network:
+
+```bash
+curl -fsS -X POST \
+  -H 'Content-Type: application/json' \
+  --data-binary @docs/diagrams/example.excalidraw \
+  'http://excalidraw:8080/render?format=png&transparent=true' \
+  -o /tmp/example.png
+```
+
+`format` is `png` or `svg`; `scale`, `width`, `transparent` and `dark` are
+supported. The sidecar is based on the pinned Playwright image and runs
+non-root with a read-only rootfs, tmpfs `/tmp`, dropped capabilities and
+`no-new-privileges`. The upstream renderer script and template are vendored
+under `docker/opencode/tools/excalidraw-renderer/` so the image is reproducible.
 
 ### Squid limitations
 

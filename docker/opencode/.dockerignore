@@ -19,6 +19,7 @@ lease-admin.token
 secrets/
 stack/
 test/
+tools/
 broker/
 docs/
 home/

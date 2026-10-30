@@ -121,7 +121,7 @@ CACHE_DIR="$(cd "$CACHE_DIR" && pwd -P)"
 LEASE_TOKEN_FILE="${LEASE_TOKEN_FILE:-$STATE_DIR/lease-token}"
 BROKER_URL_IN_CONTAINER="${BROKER_URL:-http://broker:8080}"
 PROXY_URL="http://squid:3128"
-NO_PROXY_VALUE="litellm,broker,squid,localhost,127.0.0.1,::1"
+NO_PROXY_VALUE="litellm,broker,squid,excalidraw,localhost,127.0.0.1,::1"
 
 warn_unsafe() {
   cat >&2 <<'EOF'
@@ -458,6 +458,7 @@ with urllib.request.urlopen(request, timeout=10) as response:
     --env LEASE_TOKEN="$LEASE_TOKEN"
     --env LITELLM_API_KEY="$LITELLM_API_KEY"
     --env LITELLM_BASE_URL="$LITELLM_BASE_URL"
+    --env EXCALIDRAW_RENDER_URL="http://excalidraw:8080"
     --env OPENCODE_WORKSPACE="$REPO_ROOT"
     --env OPENCODE_AUDIT_LOG=/var/log/opencode/audit.jsonl
     --env GIT_TERMINAL_PROMPT=0

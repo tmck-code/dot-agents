@@ -24,8 +24,9 @@ stays on the internal data network that the agent cannot join.
   `qwen-local` to the broker's default `LITELLM_MODELS` allowlist, and add
   `litellm/qwen-local` to the OpenCode model catalogue with
   `limit.context: 65536` and `limit.output: 8192`.
-- Keep `litellm/claude-sonnet` as the default model. Think stays enabled by
-  default, and vision/mmproj is deferred.
+- Make `litellm/qwen-local` the default and only listed OpenCode model; cloud
+  aliases remain configured in LiteLLM but are omitted from the OpenCode
+  catalogue. Think stays enabled by default, and vision/mmproj is deferred.
 - Add an opt-in real-model smoke test and static configuration tests. The base
   stack smoke test continues to run without the `llama` profile, a GPU or a
   model file.
@@ -58,8 +59,8 @@ stays on the internal data network that the agent cannot join.
 - New `docker/opencode/stack/docker-compose.llama-gpu.yml` and
   `docker/opencode/stack/llama-model.sh`.
 - `docker/opencode/stack/litellm.yaml`: `qwen-local` model entry.
-- `docker/opencode/config/opencode.jsonc`: `qwen-local` model entry with limits;
-  default model unchanged.
+- `docker/opencode/config/opencode.jsonc`: `qwen-local` model entry with limits
+  and the top-level default changed to `litellm/qwen-local`.
 - `.gitignore`: ignore `docker/opencode/stack/models/` and `*.gguf`.
 - New `docker/opencode/test/llama-smoke.sh` and `test/llama-config.sh`;
   `docker/opencode/Makefile` gains `test-llama` and includes the static test in
@@ -68,5 +69,6 @@ stays on the internal data network that the agent cannot join.
   `qwen-local`.
 - `docker/opencode/README.md`: local model operations and rollback.
 - No new host port, no new network, no provider root key in the agent, and no
-  change to the default model or to the required stack services checked by
-  `run.sh`.
+  change to the required stack services checked by `run.sh`. The default model
+  changes to `litellm/qwen-local`, so the local profile must be started before
+  OpenCode.

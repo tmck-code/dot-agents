@@ -43,7 +43,7 @@ PUBLISH_BUILD_ARGS = \
 .PHONY: build run shell test test-legacy test-hardening test-egress test-stack \
 	test-broker test-guardrails test-worktree test-unsafe test-no-secrets \
 	test-llama-config test-llama llama-up llama-lease llama-status llama-logs llama-down \
-	test-all build-multi clean help
+	excalidraw-up excalidraw-down test-excalidraw test-all build-multi clean help
 
 ## build: build for this host's architecture and load it into Docker
 build:
@@ -136,6 +136,18 @@ llama-logs:
 ## llama-down: stop the llama service, leave the rest of the stack up
 llama-down:
 	./stack/llama.sh down
+
+## excalidraw-up: start the optional Excalidraw renderer sidecar
+excalidraw-up:
+	docker compose -f stack/docker-compose.yml --profile tools up -d --build --wait --force-recreate excalidraw
+
+## excalidraw-down: stop the Excalidraw renderer sidecar
+excalidraw-down:
+	docker compose -f stack/docker-compose.yml --profile tools rm -sf excalidraw
+
+## test-excalidraw: build and exercise the Excalidraw renderer sidecar
+test-excalidraw:
+	IMAGE=$(IMAGE) ./test/excalidraw-renderer.sh
 
 ## test-all: every suite that does not need a running production lease
 test-all: test-legacy test-hardening test-broker test-guardrails test-worktree test-unsafe test-llama-config

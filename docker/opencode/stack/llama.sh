@@ -129,8 +129,8 @@ approve_lease() {
   cat <<EOF
 
 llama: local model is ready.
-  In OpenCode: /model litellm/qwen-local
-  Default stays litellm/claude-sonnet.
+  OpenCode default: litellm/qwen-local
+  Only qwen-local is listed; cloud aliases are not in the OpenCode catalogue.
 EOF
 }
 

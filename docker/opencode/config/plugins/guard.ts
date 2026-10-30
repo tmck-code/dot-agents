@@ -9,7 +9,7 @@ import { isAbsolute } from "node:path"
 
 const PROXY = process.env.HTTPS_PROXY ?? "http://squid:3128"
 const NO_PROXY =
-  process.env.NO_PROXY ?? "litellm,broker,squid,localhost,127.0.0.1,::1"
+  process.env.NO_PROXY ?? "litellm,broker,squid,excalidraw,localhost,127.0.0.1,::1"
 
 const PROXY_ENV: Record<string, string> = {
   HTTP_PROXY: process.env.HTTP_PROXY ?? PROXY,

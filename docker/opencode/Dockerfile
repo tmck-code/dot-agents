@@ -172,9 +172,11 @@ RUN chmod 0755 /etc/opencode /etc/opencode/plugins \
 COPY --chown=root:root bin/git-credential-lease /usr/local/bin/git-credential-lease
 COPY --chown=root:root bin/git-askpass-lease /usr/local/bin/git-askpass-lease
 COPY --chown=root:root bin/gh-lease /usr/local/bin/gh
+COPY --chown=root:root bin/excalidraw-render /usr/local/bin/excalidraw-render
 RUN chmod 0755 /usr/local/bin/git-credential-lease \
              /usr/local/bin/git-askpass-lease \
-             /usr/local/bin/gh
+             /usr/local/bin/gh \
+             /usr/local/bin/excalidraw-render
 
 # Bind-mounted repos are owned by the host user, which the container cannot
 # resolve. The launcher scopes safe.directory to the mounted repo with

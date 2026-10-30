@@ -123,6 +123,53 @@ services:
       retries: 12
       start_period: 10s
 
+  # Optional diagram renderer. Profile-gated because the Playwright image is
+  # large and only needed for visual diagram validation. The agent reaches it
+  # on opencode-agent; the renderer reaches esm.sh only through Squid.
+  excalidraw:
+    build:
+      context: ../tools/excalidraw-renderer
+      dockerfile: Dockerfile
+    image: opencode-excalidraw-renderer:local
+    container_name: opencode-excalidraw
+    profiles: ["tools"]
+    restart: unless-stopped
+    networks:
+      - opencode-agent
+    depends_on:
+      squid:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=1g
+    shm_size: 1gb
+    user: "1000:1000"
+    init: true
+    pids_limit: ${EXCALIDRAW_PIDS_LIMIT:-512}
+    mem_limit: ${EXCALIDRAW_MEMORY:-2g}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    environment:
+      HOME: /tmp
+      HTTP_PROXY: http://squid:3128
+      HTTPS_PROXY: http://squid:3128
+      http_proxy: http://squid:3128
+      https_proxy: http://squid:3128
+      NO_PROXY: litellm,broker,squid,localhost,127.0.0.1,::1
+      no_proxy: litellm,broker,squid,localhost,127.0.0.1,::1
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3)"
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
   # Optional local model. Profile-gated so the base stack and tests do not
   # need a 2.5 GB GGUF or a GPU. Only LiteLLM joins this service: the agent is
   # not on opencode-data and cannot reach llama:8080.
