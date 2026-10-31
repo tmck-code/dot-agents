@@ -222,6 +222,11 @@ __marimo__/
 # agent scratch shelves (dewey-decimal)
 .scratch/
 
+# OpenCode local state (never commit credentials or installed deps)
+node_modules/
+home/general/.config/opencode/service.json
+home/general/.config/opencode/auth.json
+
 # agent-graph output
 /agent-graph.html
 

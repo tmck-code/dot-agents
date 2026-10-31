@@ -1,7 +1,8 @@
 # dot-agents
 
 Agentic dotfiles: skills, hooks, agents, commands, routing tables and settings
-for Claude Code, with OpenCode portability studied in
+for Claude Code and OpenCode. The Python hooks are shared; an OpenCode bridge
+plugin translates events to their Claude Code contract. See
 [docs/opencode-port.md](docs/opencode-port.md).
 
 Everything that used to live under `.claude/` in
@@ -12,6 +13,10 @@ Everything that used to live under `.claude/` in
 ```
 home/general/.claude/   shared on every machine: CLAUDE.md, agents, commands,
                         hooks, scripts, skills, routing tables, hook docs
+home/general/.config/   shared OpenCode config: opencode.jsonc, cli.json,
+  opencode/             plugins/claude-hooks.ts (Claude hook bridge)
+home/general/bin/       ~/bin helpers: opencode-docker (run the container
+                        against the current repo)
 home/linux/.claude/     Linux-only: settings.json, hooks/agent-notify.py,
                         scripts/agent-watch.sh
 home/osx/.claude/       macOS-only: settings.json
@@ -23,7 +28,11 @@ genuinely OS- or machine-specific files belong in `home/linux/` or
 `home/osx/`. The pre-commit hook rejects shared files that reappear per OS.
 
 `home/<os>/.claude/<path>` is symlinked to `$CLAUDE_CONFIG_DIR/<path>`
-(default `~/.claude/<path>`).
+(default `~/.claude/<path>`), and `home/<os>/.config/opencode/<path>` to
+`$HOME/.config/opencode/<path>`.
+
+Local OpenCode secrets (`service.json`, `auth.json`) and `node_modules/` stay
+out of the repo; they are listed in `.gitignore`.
 
 ## Install
 
@@ -34,8 +43,8 @@ CLAUDE_CONFIG_DIR=~/.claude.personal ./deploy.sh osx
 ```
 
 `deploy.sh` installs `home/general` first, then the selected OS. It skips
-`__pycache__`, `.pytest_cache`, `.ruff_cache` and `.scratch`, and removes stale
-symlinks that point into this repo but no longer resolve. If a managed directory
+`__pycache__`, `.pytest_cache`, `.ruff_cache`, `.scratch` and `node_modules`,
+and removes stale symlinks that point into this repo but no longer resolve. If a managed directory
 (`agents`, `commands`, `hooks`, `scripts`, `skills`) is itself a symlink into
 this repo, it replaces it with a real directory before linking the files. It
 also sets `core.hooksPath` to `.githooks`.
@@ -67,6 +76,23 @@ From any repo:
 /path/to/dot-agents/docker/opencode/run.sh run "summarise this repo"
 ```
 
+Or, after `./deploy.sh linux|osx`, the same launcher is on `~/bin`:
+
+```
+cd ~/dev/some-project
+opencode-docker --stack          # first run: start the safe stack + lease
+opencode-docker
+opencode-docker --shell
+opencode-docker run "summarise this repo"
+opencode-docker --status         # show the safe-stack containers
+opencode-docker --down           # stop the safe stack (--down --volumes wipes state)
+```
+
+It mounts the git root of `$PWD` at the same absolute path inside the
+container. `--stack` starts the documented safe stack and approves a lease, then
+launches. `REPO_ROOT=/path` overrides the mount; `--unsafe` is for trusted
+debugging only.
+
 It bind-mounts the repo at the same absolute path, plus `~/.claude` (or
 `$CLAUDE_CONFIG_DIR`), the OpenCode config/data/state/cache dirs, and
 `~/.agents`. Authenticate on the host first (`opencode auth login`) so the
@@ -97,6 +123,25 @@ All paths are under `$CLAUDE_CONFIG_DIR`.
 `hooks/precompact-probe.py` is tracked but not registered. It is a diagnostic
 that logs every `PreCompact` payload to `hooks/state/precompact-log.jsonl`; add
 it to `PreCompact` when that data is wanted.
+
+### OpenCode
+
+`home/general/.config/opencode/plugins/claude-hooks.ts` bridges OpenCode V2's
+in-process hooks and event stream to the same Python scripts. The scripts still
+see Claude-shaped stdin, so there is one hook implementation, not two:
+
+| Claude event | OpenCode surface |
+|---|---|
+| `UserPromptSubmit` | `session.hook("prompt")` |
+| `PreToolUse` | `tool.hook("execute.before")` (deny throws) |
+| `PostToolUse` | `tool.hook("execute.after")` |
+| `PreCompact` | `session.hook("compaction")` |
+| `Stop` / `SubagentStop` | `session.execution.succeeded` |
+| `StopFailure` | `session.execution.failed` |
+
+`additionalContext` is queued and injected as a system part on the session's
+next model call. Set `OPENCODE_HOOKS_DEBUG=1` to log setup, hook invocations and
+the raw event stream under `/tmp/opencode/`.
 
 ### Report files
 
