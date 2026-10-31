@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-'''SubagentStop mechanical report capture: write the subagent's report file for it.
+'''SubagentStop mechanical report capture: write the subagent report to disk for it.
 
 Relying on an injected nudge asking the subagent to Write its report to a
 scratchpad file is unreliable, and forensics on a real 13-subagent session put
@@ -35,6 +35,11 @@ Quirks (verified empirically):
     fires), whose `last_assistant_message` is a terse status line like
     "Grepping consumers...". Capturing those writes stray report files that read
     as "my own prior message".
+
+Brief report file: if the brief (first user message of the subagent transcript)
+has a line `REPORT FILE: <path>`, the same final text is also written there, but
+only when that file is missing or blank. Content the subagent wrote itself is
+never changed. A relative path resolves against the payload `cwd`.
 
 It must NEVER block: any parse error, missing field, or I/O hiccup -> exit 0
 cleanly. We never emit a "block" decision.
@@ -86,6 +91,59 @@ def description_from_payload(data, agent_id):
     except (AttributeError, TypeError):
         pass
     return None
+
+
+ANCHORED_RE = re.compile(r'^\s*REPORT FILE:(.*)$', re.I)
+PATH_RE = re.compile(r'(?<![\w.-])(?:/|\.scratch/)[^\s`\'"<>)]*?\.md\b')
+
+
+def brief_report_path(agent_transcript_path, cwd):
+    '''Report path named by a `REPORT FILE:` line in the first user message.'''
+    if not agent_transcript_path:
+        return None
+    text = None
+    with open(agent_transcript_path) as f:
+        for raw in f:
+            try:
+                entry = json.loads(raw)
+            except ValueError:
+                continue
+            if not isinstance(entry, dict) or entry.get('type') != 'user':
+                continue
+            content = (entry.get('message') or {}).get('content')
+            if isinstance(content, list):
+                content = '\n'.join(
+                    b.get('text', '') for b in content if isinstance(b, dict)
+                )
+            if isinstance(content, str):
+                text = content
+                break
+    if not text:
+        return None
+    for line in text.splitlines():
+        m = ANCHORED_RE.match(line)
+        if m:
+            found = PATH_RE.findall(m.group(1))
+            if not found:
+                return None
+            path = found[-1]
+            if not os.path.isabs(path):
+                path = os.path.join(cwd or '.', path)
+            return path
+    return None
+
+
+def write_brief_report(path, text):
+    '''Write text to path unless it already holds non-blank content.'''
+    try:
+        with open(path) as f:
+            if f.read().strip():
+                return
+    except FileNotFoundError:
+        pass
+    os.makedirs(os.path.dirname(path) or '.', exist_ok=True)
+    with open(path, 'w') as f:
+        f.write(text)
 
 
 def main() -> int:
@@ -143,12 +201,21 @@ def main() -> int:
     if agent_transcript_path:
         lines.append(f'**Agent transcript path:** {agent_transcript_path}')
     lines += ['', '---', '', last_message]
+    full_text = '\n'.join(lines)
 
     try:
         with open(report_path, 'w') as f:
-            f.write('\n'.join(lines))
+            f.write(full_text)
     except OSError:
         return 0  # write failed -> never block
+
+    # Also write to the report path named in the brief, if any.
+    try:
+        brief_path = brief_report_path(agent_transcript_path, data.get('cwd'))
+        if brief_path:
+            write_brief_report(brief_path, full_text)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass  # best effort; never block
 
     # Breadcrumb for the parent-side announcer. Session-scoped dir so the
     # companion can flush every pending capture without knowing agent ids.

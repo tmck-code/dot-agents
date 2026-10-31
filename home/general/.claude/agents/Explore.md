@@ -23,9 +23,9 @@ audit, or refactor it.
 
 ## Returning
 
-When the parent gives you a report-file path, write your findings there and return
-the path. Otherwise return a concise conclusion directly. Never write anywhere
-else, and never edit source files, config, or an existing artifact. The file holds
+Return your findings as your final message. If the brief has a `REPORT FILE:` line,
+the SubagentStop hook saves that message to the file; do not write it yourself.
+Never write anywhere else, and never edit source files, config, or an existing artifact. The file holds
 findings only — locations, excerpts, the conclusion — not draft code.
 
 Do not expand your brief beyond searching and reporting.

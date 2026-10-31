@@ -4,8 +4,9 @@ Applies in every repo. Project `CLAUDE.md` files layer on top and win on conflic
 
 > **Subagents: this file is about your coordinator, not you.** Stay in your brief,
 > do not dispatch follow-on work you were not asked for, and never fork a child
-> that edits your own files. Finish the brief, write the report file you were
-> given, return its path.
+> that edits your own files. Finish the brief and return your full
+> findings as your final message. The SubagentStop hook saves it to the report file named
+> in your brief.
 
 ## Session start
 
@@ -32,8 +33,8 @@ Route: subagents absorb noise, you absorb verdicts. Delegate gates, multi-file d
 
 ## Subagents (pass down in briefs)
 
-- **Report file: you create it, the subagent writes it.** Before spawning, create one file on the shelf at `.scratch/<shelf>/<agent>-<task>-<slug>.md` and put that exact path in the brief. The subagent writes its findings there and returns the path. Read the file; the returned message may be truncated.
-- The `SubagentStop` capture hook is a fallback for a subagent that writes nothing. If it announces a path, prefer the file you created.
+- **Report file: you create it, the hook fills it.** Before spawning, create one file on the shelf at `.scratch/<shelf>/<agent>-<task>-<slug>.md`. Put a line `REPORT FILE: <abs path>` in the brief. The subagent returns its full findings as its final message. The SubagentStop hook writes that message to the file. Read the file; the returned message may be truncated. A subagent may write the file itself (for example a very long structured document); the hook then leaves it alone.
+- The `SubagentStop` capture hook also saves every final message to a `/tmp` scratchpad file. If the brief has no `REPORT FILE:` line, the announce hook gives you that path.
 - Sole writer: one owning agent per file, split by file/module; per-agent scratch subdir; handoffs point at code on disk.
 - Git: path-scoped reads (`git diff <ref> -- <paths>`, `git show <ref>:<path>`); undo by rewriting the file. Tree-level git or co-editing one deliverable needs `isolation: "worktree"`.
 
@@ -47,7 +48,7 @@ Route: subagents absorb noise, you absorb verdicts. Delegate gates, multi-file d
 Run as `"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/gate.sh" [-t secs] [-s secs] .scratch/<shelf>/gate-<name>.log <cmd>`. Main thread: `run_in_background`; act on the notification. Subagents: foreground (no `run_in_background`, Bash `timeout: 600000` so a queued gate is not moved to the background), never poll `<log>.status`, never end a turn with a gate running, and one gate at a time across workers (gate.sh holds a machine-wide lock; a queued gate logs `waiting for another gate`).
 
 - Subagent briefs: pass the foreground rule down; a worker that backgrounds a gate ends its turn, its orchestrator stops, and the result is lost.
-- Verdict: `<log>.status`. Other views: `grep` the log.
+- Verdict: `<log>.status`. Failing tests: `<log>.failed`; with `-b <baseline>`, the new ones are in `<log>.new`. Other views: `grep` the log.
 - After a fix rerun only that file/`-k`; full suite once more, at the end.
 - Final sweep: one combined command (e.g. `make -k lint typecheck test`), not one background gate per target.
 - Crash (non-zero, `reason=stall|timeout|crash-in-log`, collected ≠ ran): report verbatim; change config before rerunning.

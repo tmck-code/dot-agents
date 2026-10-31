@@ -56,10 +56,10 @@ more accurate than you grepping cold. Before you do your own reading:
    message, multiple Agent calls).
 3. **Create the report file before spawning.** Put it on the shelf as
    `.scratch/<shelf>/<agent>-<task>-<slug>.md`, create it, and put that exact
-   path in the brief. The agent writes its findings there and returns the path.
+   path in the brief on a `REPORT FILE: <abs path>` line. The agent returns its
+   findings as its final message; the `SubagentStop` hook writes it to the file.
    After each completion notification, read that file **once**. Do not trust
-   the returned message; it is truncated. If a child writes nothing, the
-   `SubagentStop` capture hook supplies a fallback path.
+   the returned message; it is truncated.
 4. **Wait for every spawned research agent to return before doing any
    research of your own.** No parallel self-exploration while they run —
    duplicated reading wastes tokens and the reports may make it moot. Once
@@ -133,8 +133,8 @@ re-read. If you read a file whole, don't later re-read slices of it.
 
 ## Reporting back
 
-Write your full report to the report-file path your parent created and gave you,
-then return that path. If no path was given, make your final message the report.
+Return your full report as your final message. If your brief has a `REPORT FILE:`
+line, the SubagentStop hook saves the message to that file.
 Never paste the artifacts back in full. Cover:
 - the change name and `openspec/changes/<name>/` location,
 - one line per artifact created,

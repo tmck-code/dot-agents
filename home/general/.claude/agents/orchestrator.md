@@ -77,8 +77,8 @@ carries:
 - Host tooling: no `python3`, `node`, `cargo`, `npm` on the host. Read JSON with
   `jq`, edit with the Edit tool, run language tooling through the repo's
   make/docker front door.
-- Write your report to the path in this brief; if none, make your final message
-  the report.
+- Return your report as your final message. The SubagentStop hook saves it to the
+  `REPORT FILE:` path in this brief.
 
 ## Follow-ups
 
@@ -126,13 +126,12 @@ wave-N notification arrives.
 
 You created each worker's report file before spawning it and put the path in
 the brief. Read that file **once** per worker, after its completion
-notification. Do not trust the returned message; it is truncated. If a worker
-wrote nothing, the `SubagentStop` capture hook supplies a fallback path.
+notification. Do not trust the returned message; it is truncated.
 
 ## Reporting
 
-Write your full report to the report-file path your parent created and gave you,
-then return that path. If no path was given, make your final message the report.
+Return your full report as your final message. If your brief has a `REPORT FILE:`
+line, the SubagentStop hook saves the message to that file.
 List:
 
 - files changed;

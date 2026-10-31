@@ -67,8 +67,8 @@ stop. Make your final message a handoff:
 
 ## Reporting
 
-Write your report to the path in the brief. If the brief gave no path, make your
-final message the report. Include:
+Return your full report as your final message. If your brief has a `REPORT FILE:`
+line, the SubagentStop hook saves the message to that file. Include:
 
 - files changed, one line each;
 - gate commands run and their results (failures verbatim);

@@ -2,13 +2,19 @@
 # gate.sh — run a test/lint gate once, capture everything to a log, watch the
 # process, and propagate a truthful exit code.
 #
-#   gate.sh [-t TIMEOUT] [-s STALL] [-L] OUTPUT_FILE COMMAND [ARGS...]
+#   gate.sh [-t TIMEOUT] [-s STALL] [-L] [-b BASELINE] [-x] OUTPUT_FILE COMMAND [ARGS...]
 #
 #   -t TIMEOUT  hard kill after this many seconds        (default 900)
 #   -s STALL    kill if the log stops growing for this   (default 120)
 #               many seconds while the process is alive
 #   -L          do not take the machine-wide gate lock (only for a gate the
 #               caller knows is independent, e.g. a tsc-only check)
+#
+#   -b BASELINE an earlier OUTPUT_FILE.failed. OUTPUT_FILE.new lists the failing ids
+#               that are not in BASELINE. A missing BASELINE warns and counts as empty.
+#   -x          expected-fail run (the caller tests failures on purpose and judges the
+#               result itself): .failed and .new are written empty and the verdict says
+#               expected-fail=1. Exit code and .status are unchanged.
 #
 # Only one gate runs at a time per toolchain (rust or frontend; make -k sweeps are rust):
 # gate.sh takes flock on ${XDG_RUNTIME_DIR:-/tmp}/claude-gate-<kind>.lock and WAITS for it, logging
@@ -19,6 +25,11 @@
 # Writes:  OUTPUT_FILE          full combined stdout+stderr, unfiltered, each
 #                               line prefixed "[HH:MM:SS +MM:SS] " (wall, elapsed)
 #          OUTPUT_FILE.status   one line: exit=<code> reason=<why> secs=<n> lockwait=<secs>
+#          OUTPUT_FILE.failed   one failing test id per line, sorted, unique, without the
+#                               time prefix; empty if none. Parsed from cargo test, nextest,
+#                               pytest, vitest and playwright lines.
+#          OUTPUT_FILE.new      (with -b) the lines of .failed that are not in BASELINE;
+#                               written (empty) with -x; not written without -b or -x
 #          stderr               a short verdict + the interesting log lines
 #
 # Exit code = the command's exit code, or 124 timeout / 125 stall / 137 killed.
@@ -29,19 +40,23 @@ set -uo pipefail
 TIMEOUT=900
 STALL=120
 NOLOCK=0
-while getopts 't:s:L' o; do
+BASELINE=
+EXPECT_FAIL=0
+while getopts 't:s:Lb:x' o; do
   case $o in
     t) TIMEOUT=$OPTARG ;;
     s) STALL=$OPTARG ;;
     L) NOLOCK=1 ;;
+    b) BASELINE=$OPTARG ;;
+    x) EXPECT_FAIL=1 ;;
     *) exit 2 ;;
   esac
 done
 shift $((OPTIND - 1))
-[ $# -ge 2 ] || { echo "usage: gate.sh [-t secs] [-s secs] [-L] OUTPUT_FILE COMMAND..." >&2; exit 2; }
+[ $# -ge 2 ] || { echo "usage: gate.sh [-t secs] [-s secs] [-L] [-b BASELINE] [-x] OUTPUT_FILE COMMAND..." >&2; exit 2; }
 
 OUT=$1; shift
-rm -f "$OUT.status"
+rm -f "$OUT.status" "$OUT.failed" "$OUT.new"
 # Tokens of the command (quotes stripped) for classification and the guardrail.
 CMD_TOKENS=$(printf '%s' "$*" | tr -d "'\"" | tr -s '[:space:]' '\n')
 
@@ -68,7 +83,7 @@ fi
 
 mkdir -p "$(dirname "$OUT")"
 : > "$OUT"
-rm -f "$OUT.status"
+rm -f "$OUT.status" "$OUT.failed" "$OUT.new"
 
 # Per-toolchain lock (rust|frontend): one gate at a time per toolchain. Wait (never fail); the log shows we are queued.
 LOCKWAIT=0
@@ -142,8 +157,54 @@ CRASH=$(grep -nE 'node down|worker .* crashed|Segmentation fault|Error 137|Kille
 [ "$CODE" -eq 0 ] && [ -n "$CRASH" ] && REASON=crash-in-log
 
 echo "exit=$CODE reason=$REASON secs=$SECS lockwait=$LOCKWAIT" > "$OUT.status"
+
+# Failing test ids: stable (no durations or counters), sorted, unique. Empty for -x.
+extract_failed() {
+  sed -E 's/^\[[0-9]{2}:[0-9]{2}:[0-9]{2} \+[0-9]+:[0-9]{2}\] //' "$OUT" | sed -nE '
+    # cargo test
+    s/^[[:space:]]*test (.+) \.\.\. FAILED[[:space:]]*$/\1/p;t
+    # nextest: FAIL [ 1.234s] (3/40) id   (also "TRY 2 FAIL" and "SIGABRT/TIMEOUT" are ignored)
+    s/^[[:space:]]*FAIL +\[ *[0-9.]+m?s\] +(\([0-9]+\/[0-9]+\) +)?(.+[^[:space:]])[[:space:]]*$/\2/p;t
+    # pytest: keep the node id only
+    s/^FAILED ([^ ]+)( - .*)?[[:space:]]*$/\1/p;t
+    # vitest: FAIL  path > suite > name
+    s/^[[:space:]]*FAIL +([^[:space:]].*[^[:space:]])[[:space:]]*$/\1/p;t
+    # vitest x lines with a name, minus the trailing duration
+    /^[[:space:]]*[×✗] +[^[:space:]]/{
+      s/^[[:space:]]*[×✗] +//
+      s/ +[0-9.]+m?s[[:space:]]*$//
+      s/[[:space:]]+$//
+      p;d
+    }
+    # playwright: drop the leading mark and counter, and the trailing duration / retry note
+    /^[[:space:]]*✘.*›/{
+      s/^[[:space:]]*✘ +([0-9]+ +)?//
+      s/ +\((retry #[0-9]+|[0-9.]+m?s)\)([[:space:]]*\([^)]*\))*[[:space:]]*$//
+      s/[[:space:]]+$//
+      p
+    }
+  ' | sort -u
+}
+if [ "$EXPECT_FAIL" -eq 1 ]; then
+  : > "$OUT.failed"; : > "$OUT.new"
+else
+  extract_failed > "$OUT.failed"
+  if [ -n "$BASELINE" ]; then
+    if [ ! -f "$BASELINE" ]; then
+      echo "gate.sh: warning: baseline $BASELINE not found; treating it as empty" >&2
+      BASE_SORTED=$(mktemp); : > "$BASE_SORTED"
+    else
+      BASE_SORTED=$(mktemp); sort -u "$BASELINE" > "$BASE_SORTED"
+    fi
+    comm -13 "$BASE_SORTED" "$OUT.failed" > "$OUT.new"
+    rm -f "$BASE_SORTED"
+  fi
+fi
+EXTRA=
+[ "$EXPECT_FAIL" -eq 1 ] && EXTRA=" expected-fail=1"
+[ -f "$OUT.new" ] && [ "$EXPECT_FAIL" -eq 0 ] && EXTRA=" new=$(wc -l < "$OUT.new")"
 {
-  echo "=== gate: exit=$CODE reason=$REASON secs=${SECS}s log=$OUT"
+  echo "=== gate: exit=$CODE reason=$REASON secs=${SECS}s log=$OUT failed=$(wc -l < "$OUT.failed")$EXTRA"
   [ -n "$CRASH" ] && { echo "--- crash signatures:"; echo "$CRASH"; }
   echo "--- summary lines:"
   grep -nE '\] (FAILED|ERROR) |[0-9]+ (passed|failed|errors?)|\] Tests:|\] Test Suites:|✓|✗|FAIL |PASS ' "$OUT" | tail -25
