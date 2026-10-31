@@ -15,10 +15,10 @@ Question: what would it take to run this Claude Code dotfiles tree on OpenCode a
 - **One path is free:** OpenCode V2 already discovers `~/.claude/skills` (and project `.claude/skills`) as a *global compatibility source*. Every `SKILL.md` in this repo loads without conversion, with the same `name`/`description`/`disable-model-invocation` semantics.
 - **Everything else needs a thin adapter.** V2 does **not** read `.claude/agents`, `.claude/commands`, `.claude/settings.json`, `.claude/hooks`, or `CLAUDE.md`. Source: `packages/core/src/config/plugin/compatibility.ts` only scans `skills/`; `config/plugin/agent.ts` and `config/plugin/command.ts` load only from discovered OpenCode config entries.
 - **Agents and commands are text formats that can be generated** from the existing Claude files. Do not symlink them: the frontmatter differs (`tools`, `effort`, bare `model: opus` are not valid OpenCode agent fields).
-- **Hooks cannot run unchanged.** Claude hooks are stdin-JSON/exit-code subprocesses. OpenCode hooks are in-process TypeScript plugin registrations (`ctx.tool.hook`, `ctx.session.hook`, `ctx.permission.hook`, `ctx.shell.hook`) plus an async event stream. Every hook needs either a TypeScript port or a generic "spawn the Python script with a synthesised stdin payload" bridge plugin.
+- **Hooks are bridged, not ported.** Claude hooks are stdin-JSON/exit-code subprocesses. OpenCode hooks are in-process TypeScript plugin registrations (`ctx.tool.hook`, `ctx.session.hook`, `ctx.shell.hook`) plus an async event stream. A single bridge plugin, `home/general/.config/opencode/plugins/claude-hooks.ts`, synthesises Claude-shaped stdin payloads, spawns the existing Python hooks, and applies their decisions. The Python files stay the single source of truth for both harnesses.
 - **Statusline has no equivalent.** The YAS statusline is Claude/CLI-specific. OpenCode has a built-in TUI status area, and custom UI requires a TUI plugin (`@opencode/plugin/tui`), not a command that prints a line.
 - **Notifications move from hooks to `cli.json`:** `attention.notifications`, `attention.sound`, `attention.sounds.{permission,done,error,subagent_done}`.
-- **Recommended shape:** keep `home/general/.claude/` as the canonical source, add `home/general/opencode/` for OpenCode-native files (`plugins/`, `opencode.jsonc`, `cli.json`), and **generate** agents/commands/`AGENTS.md` into a git-ignored build directory at deploy time. Symlink only the parts that are byte-identical (skills).
+- **Recommended shape:** keep `home/general/.claude/` as the canonical source, add `home/general/.config/opencode/` for OpenCode-native files (`plugins/`, `opencode.jsonc`, `cli.json`), and **generate** agents/commands/`AGENTS.md` into a git-ignored build directory at deploy time. Symlink only the parts that are byte-identical (skills).
 
 ---
 
@@ -258,6 +258,38 @@ and `attention.sounds` are the notification surface.
 | `yas-prompt-hook.py` | UserPromptSubmit, writes timestamps for statusline | **No equivalent** | Only useful to YAS; drop with the statusline |
 | `agent-notify.py` (linux only) | Notification + Stop + StopFailure | **No equivalent** | Replace with `cli.json` `attention.notifications`/`sound`; optionally a plugin that calls `notify-send` from `session.execution.*` |
 
+### 6.4 Implemented bridge (2026-10-30)
+
+`home/general/.config/opencode/plugins/claude-hooks.ts` is a dependency-free
+OpenCode V2 plugin. It is a single `.ts` file (not a plugin directory) because
+OpenCode 2.1 rejects a plugin directory whose entry file is a symlink pointing
+outside that directory. Deploy symlinks the file into
+`~/.config/opencode/plugins/`, where OpenCode's global plugin discovery picks it
+up.
+
+| Claude event | Bridge surface | Behaviour |
+|---|---|---|
+| `UserPromptSubmit` | `session.hook("prompt")` | Runs `skill-nudge.py`; appends `additionalContext` to the prompt text. |
+| `PreToolUse` | `tool.hook("execute.before")` | Runs the guards; a deny throws, which OpenCode turns into a rejected tool call. `additionalContext` is queued for the next model call. |
+| `PostToolUse` | `tool.hook("execute.after")` | Runs `same-file-write-audit.py` and appends its warning to the tool result. Also drains subagent report breadcrumbs for `subagent`. |
+| `PreCompact` | `session.hook("compaction")` | Runs `precompact-probe.py`. |
+| `Stop` | `session.execution.succeeded` | Sends a `Done` notification through `agent-notify.py` on Linux. |
+| `SubagentStop` | `session.execution.succeeded` with `parentID` | Runs `subagent-report-capture.py`, `handoff-nudge.py`, and the parent-side report announce; queues parent context for the next model call. |
+| `StopFailure` | `session.execution.failed` | Sends an `Error` notification. |
+| `Notification` | `cli.json` `attention.*` | Left to OpenCode's native attention system. |
+| YAS statusline | — | Claude-specific; OpenCode uses its own TUI status/plugin. |
+
+Payload translation is the only harness-specific code: OpenCode tool names map
+to Claude names (`shell`→`Bash`, `edit`/`write`→`Edit`/`Write`, `subagent`→`Agent`),
+`path` maps to `file_path`, and `agent_id`/`agent_type` are populated only for
+child sessions (the same rule Claude uses). Environment variables
+`CLAUDE_CONFIG_DIR` and `CLAUDE_PROJECT_DIR` are set so the Python hooks resolve
+their scripts and project routing tables unchanged.
+
+Set `OPENCODE_HOOKS_DEBUG=1` to log plugin setup, hook invocations
+(`/tmp/opencode/claude-hooks.log`), and the raw event stream
+(`/tmp/opencode/claude-events.log`).
+
 **Payload differences worth restating:** Claude gives you `agent_id` *only* for subagent-originated calls; OpenCode gives `event.agent` for every tool event (main agent and subagent). Claude gives `transcript_path`; OpenCode gives `sessionID` plus a message API. Claude reports a subagent's final text as `last_assistant_message`; OpenCode delivers it as a synthetic parent message. Claude `cwd` is a field; OpenCode gives `ctx.location.directory` / `event`-less session context.
 
 ---
@@ -354,8 +386,8 @@ Source: <https://opencode.ai/v2/docs/mcp-servers>.
 **One canonical source, generated adapters, no duplicated bodies.**
 
 - **Canonical:** keep `home/general/.claude/{CLAUDE.md,agents,commands,skills}` exactly as today (Claude Code is the primary tool and its format is the richer one for this repo).
-- **OpenCode-native (hand-written):** `home/general/opencode/{opencode.jsonc,cli.json,plugins/}` — things with no Claude equivalent.
-- **Generated (not checked in):** `home/general/opencode/_generated/{AGENTS.md,agents/,commands/}` — rebuilt by `deploy.sh` from the `.claude` source.
+- **OpenCode-native (hand-written):** `home/general/.config/opencode/{opencode.jsonc,cli.json,plugins/}` — things with no Claude equivalent.
+- **Generated (not checked in):** `home/general/.config/opencode/_generated/{AGENTS.md,agents/,commands/}` — rebuilt by `deploy.sh` from the `.claude` source.
 - **Symlinked:** skills (`~/.config/opencode/skills -> ~/.claude/skills`) or rely on OpenCode's `~/.claude/skills` compatibility.
 
 Why not symlink agents/commands directly: symlinks cannot change frontmatter, and OpenCode must not see `tools:`/`effort`/bare `model:`.
@@ -410,7 +442,7 @@ $OPENCODE_CONFIG_DIR/                # ~/.config/opencode
   agents/*.md                        # generated
   commands/*.md                      # generated
   skills -> $CLAUDE_CONFIG_DIR/skills
-  plugins/                           # symlinked from home/general/opencode/plugins
+  plugins/                           # symlinked from home/general/.config/opencode/plugins
   _generated/                        # build output (gitignored)
 ```
 
@@ -421,7 +453,7 @@ Current script only knows `.claude`. Concrete changes:
 1. Add `OPENCODE_CONFIG_DIR="${OPENCODE_CONFIG_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode}"`.
 2. Change the CLI to `./deploy.sh [--tool claude|opencode|both] linux|osx`, defaulting to `both` once stable.
 3. Keep `install_homedir` for the Claude tree. Add `install_opencode`:
-   - symlink `home/general/opencode/{plugins,overlay}` into `$OPENCODE_CONFIG_DIR`;
+   - symlink `home/general/.config/opencode/{plugins,overlay}` into `$OPENCODE_CONFIG_DIR`;
    - run `python3 tools/render_opencode.py --repo "$REPO_ROOT" --os "$1" --out "$OPENCODE_CONFIG_DIR/_generated"`;
    - symlink or copy generated files into `$OPENCODE_CONFIG_DIR`;
    - merge `opencode.jsonc` + OS overlay into `$OPENCODE_CONFIG_DIR/opencode.jsonc` (use JSON, not JSONC, for generated output);

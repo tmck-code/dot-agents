@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# `gh` wrapper that uses a lease token instead of ~/.config/gh.
+#
+# The image renames the real binary to /usr/bin/gh-real and installs this
+# wrapper at /usr/local/bin/gh. Without BROKER_URL/LEASE_TOKEN the wrapper
+# still runs the real gh so `--unsafe` keeps the legacy behaviour; a configured
+# lease that fails to mint exits non-zero instead of falling back.
+set -euo pipefail
+
+real_gh="${GH_REAL_BINARY:-/usr/bin/gh-real}"
+if [[ ! -x "$real_gh" ]]; then
+  real_gh="$(command -v gh-real || true)"
+fi
+if [[ -z "$real_gh" ]]; then
+  echo "gh-lease: gh-real not found" >&2
+  exit 127
+fi
+
+if [[ -n "${BROKER_URL:-}" && -n "${LEASE_TOKEN:-}" ]]; then
+  token="$(curl -fsS --max-time 10 \
+    -H "Authorization: Bearer ${LEASE_TOKEN}" \
+    "${BROKER_URL%/}/v1/token/github" | jq -r '.token // empty')"
+  if [[ -z "$token" ]]; then
+    echo "gh-lease: broker returned no token" >&2
+    exit 1
+  fi
+  export GH_TOKEN="$token"
+  export GITHUB_TOKEN="$token"
+fi
+
+exec "$real_gh" "$@"

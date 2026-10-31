@@ -222,5 +222,23 @@ __marimo__/
 # agent scratch shelves (dewey-decimal)
 .scratch/
 
+# OpenCode local state (never commit credentials or installed deps)
+node_modules/
+home/general/.config/opencode/service.json
+home/general/.config/opencode/auth.json
+
 # agent-graph output
 /agent-graph.html
+
+# OpenCode secure stack: host-side secrets and runtime state
+docker/opencode/stack/secrets/
+docker/opencode/stack/models/
+*.gguf
+docker/opencode/stack/*.db
+docker/opencode/stack/*.log
+secrets.enc.yaml
+secrets.yaml
+*.kdbx
+*.kdbx.key
+age-key.txt
+age.key

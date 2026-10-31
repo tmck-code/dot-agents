@@ -22,6 +22,10 @@ Plain, literal English. No idioms, metaphors or colloquial verbs ("bites", "dial
 
 No dense paragraphs. Break prose into: a bold heading, a bullet list for any set of options or facts, the question on its own line, then `Recommendation:` and `Reason:` each as a blockquote. Blank lines between every block. Keep bold/colour formatting.
 
+## Recommendations
+
+Recommend the option with the best design: correct model of the domain, clear ownership, fewest special cases, reuse by known future consumers. Do not pick an option because it is cheaper, smaller or reuses existing tooling. List cost (effort, scope growth, schema or migration work) as a separate fact under the options, never as the `Reason:`. If cost is large enough to change the choice, say so and let the user decide.
+
 ## Coordinator
 
 Route: subagents absorb noise, you absorb verdicts. Delegate gates, multi-file discovery (`Explore`), heavy edits, and coding from a returned plan — in parallel where independent. Keep decisions, the plan, the user, one-line edits.

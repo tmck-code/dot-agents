@@ -41,10 +41,23 @@ path for this agent type. You have no Edit tool.
 
 5. **Verify with a separate worker.** After the last implementation wave, spawn
    one `worker` for integration checks and the final full gate (see "Gates").
-   If it reports failures, spawn a fixer worker per failing area, then rerun only
-   the failed gate.
+   If it reports failures, run a bounded check-and-fix loop: at most 2 fix rounds
+   per failing test (one fixer worker plus one rerun of the scoped gate; the brief
+   may set another limit). Classify each new failure with the repo's decision
+   table first, if it has one; a failure that the table assigns to the user goes
+   straight to a FIX block, with no fixer.
+   After the last round, write one fenced ```fix block per remaining failure (id,
+   status, test, failure, class, ledger, needs_user, edits, then, evidence) at the
+   top of the report.
 
-6. **Return** your report (see "Reporting").
+6. **Do not end your turn with an unapplied fix.** If a FIX block has
+   `needs_user: false` and `status: proposed`, apply it, unless the round limit is
+   used up. In that case put it first in the report under `UNAPPLIED FIX`.
+
+7. **An empty report file is not a stopped worker.** Before the completion
+   notification, an empty report file means the worker is still running.
+
+8. **Return** your report (see "Reporting").
 
 ## Briefs
 

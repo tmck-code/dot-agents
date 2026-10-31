@@ -1,13 +1,14 @@
 #!/bin/bash
-# Symlink the Claude Code config tree for one OS into $CLAUDE_CONFIG_DIR.
+# Symlink the agent config trees for one OS into their home locations.
 #
 #   ./deploy.sh linux          # installs home/general + home/linux
 #   ./deploy.sh osx            # installs home/general + home/osx
 #   CLAUDE_CONFIG_DIR=~/.claude.personal ./deploy.sh osx
 #
 # Files are symlinked (not copied), so edits in this repo take effect
-# immediately. Layout mirrors the tree under the config dir:
-#   home/<os>/.claude/<path>  ->  $CLAUDE_CONFIG_DIR/<path>
+# immediately. Layout mirrors the destination tree:
+#   home/<os>/.claude/<path>             ->  $CLAUDE_CONFIG_DIR/<path>
+#   home/<os>/.config/opencode/<path>    ->  $HOME/.config/opencode/<path>
 #
 # Shared config lives in home/general; only genuinely OS-specific files live in
 # home/linux or home/osx. Caches and scratch dirs are never installed, and stale
@@ -31,7 +32,7 @@ function dest_for() {
 # Never install generated caches or agent scratch.
 function skip_path() {
   case "/$1/" in
-    */__pycache__/*|*/.pytest_cache/*|*/.ruff_cache/*|*/.scratch/*|*/.git/*) return 0 ;;
+    */__pycache__/*|*/.pytest_cache/*|*/.ruff_cache/*|*/.scratch/*|*/.git/*|*/node_modules/*) return 0 ;;
   esac
   case "$1" in
     *.pyc|*.pyo|*.DS_Store) return 0 ;;
@@ -65,6 +66,7 @@ function install_homedir() {
   for sub in agents commands hooks scripts skills; do
     ensure_real_dir "$CLAUDE_CONFIG_DIR/$sub"
   done
+  ensure_real_dir "$HOME/.config/opencode"
 
   while IFS= read -r -d '' src; do
     local rel="${src#"$root"/}"
@@ -103,6 +105,7 @@ function prune_stale() {
   for sub in agents commands hooks scripts skills; do
     [[ -d "$CLAUDE_CONFIG_DIR/$sub" ]] && dirs+=("$CLAUDE_CONFIG_DIR/$sub")
   done
+  [[ -d "$HOME/.config/opencode" ]] && dirs+=("$HOME/.config/opencode")
 
   local dir link target
   for dir in "${dirs[@]}"; do

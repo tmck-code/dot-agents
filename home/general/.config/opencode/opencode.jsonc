@@ -1,0 +1,16 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "ollama/qwen3.5:4b",
+  "provider": {
+    "ollama": {
+      "models": {
+        "qwen3.5:4b": {
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
+        }
+      }
+    }
+  }
+}

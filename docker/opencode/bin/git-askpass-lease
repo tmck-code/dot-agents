@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# GIT_ASKPASS helper for HTTPS remotes. Prints the lease username or token
+# depending on the prompt. Fails closed when the broker is unavailable.
+set -euo pipefail
+
+: "${BROKER_URL:?BROKER_URL is not set}"
+: "${LEASE_TOKEN:?LEASE_TOKEN is not set}"
+
+prompt="${1:-}"
+case "$prompt" in
+  *[Uu]sername*)
+    printf 'x-access-token\n'
+    ;;
+  *[Pp]assword*|*[Tt]oken*)
+    token="$(curl -fsS --max-time 10 \
+      -H "Authorization: Bearer ${LEASE_TOKEN}" \
+      "${BROKER_URL%/}/v1/token/github" | jq -r '.token // empty')"
+    if [[ -z "$token" ]]; then
+      echo "git-askpass-lease: broker returned no token" >&2
+      exit 1
+    fi
+    printf '%s\n' "$token"
+    ;;
+  *)
+    exit 1
+    ;;
+esac

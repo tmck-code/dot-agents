@@ -1,0 +1,122 @@
+// System OpenCode policy, baked into the image at /etc/opencode/opencode.jsonc.
+//
+// It is loaded at the highest precedence and is root-owned, mode 0444. A
+// project can add rules but cannot re-enable anything denied here. Keep this
+// file free of secrets: values come from the container environment.
+{
+  "$schema": "https://opencode.ai/v2/config.json",
+
+  // Hard policies. An explicit deny is final and is not offered to the
+  // permission hook, so a project or plugin cannot turn it back into an allow.
+  "policies": [
+    // Only the local LiteLLM reverse proxy may be used as a model provider.
+    // No provider root key ever exists in the agent container. Policies use
+    // last-match-wins and allow only lifts a broader deny, so the broad deny
+    // comes first and the exception follows it.
+    { "action": "provider.use", "resource": "*", "effect": "deny" },
+    { "action": "provider.use", "resource": "litellm", "effect": "allow" },
+
+    // Escape attempts and host-level tooling that has no place in the agent.
+    { "action": "tool.use", "resource": "shell:sudo *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:su *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:doas *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:mount *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:umount *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:nsenter *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:unshare *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:chroot *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:docker *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:podman *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:kexec *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:insmod *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:modprobe *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:setcap *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:iptables *", "effect": "deny" },
+    { "action": "tool.use", "resource": "shell:nft *", "effect": "deny" },
+
+    // Project plugins and MCP servers are code execution. They stay denied by
+    // default. Approve a specific one by adding an allow for its exact
+    // resource in a reviewed system policy change, never in project config.
+    // The image's own guard/audit/lease plugins are the only approvals.
+    { "action": "integration.use", "resource": "plugin:*", "effect": "deny" },
+    { "action": "integration.use", "resource": "plugin:/etc/opencode/plugins/guard.ts", "effect": "allow" },
+    { "action": "integration.use", "resource": "plugin:/etc/opencode/plugins/audit.ts", "effect": "allow" },
+    { "action": "integration.use", "resource": "plugin:/etc/opencode/plugins/lease.ts", "effect": "allow" },
+    // User-level hook bridge: Python hooks stay the single source of truth.
+    // Both the config symlink path and the repo target can be the plugin path.
+    { "action": "integration.use", "resource": "plugin:/home/agent/.config/opencode/plugins/claude-hooks.ts", "effect": "allow" },
+    { "action": "integration.use", "resource": "plugin:/home/freman/dev/dot-agents/home/general/.config/opencode/plugins/claude-hooks.ts", "effect": "allow" },
+    { "action": "integration.use", "resource": "mcp:*", "effect": "deny" },
+    // Skills are data, but they can steer the agent; allow discovery and audit
+    // their use. Untrusted work should deny this action as well.
+    { "action": "integration.use", "resource": "skill:*", "effect": "allow" }
+  ],
+
+  // Least-privilege permissions. The default is deny for filesystem access,
+  // with explicit allows for the mounted workspace and runtime directories.
+  // Protected paths are denied last so they win over the broader allows.
+  "permissions": [
+    { "action": "read", "resource": "*", "effect": "deny" },
+    { "action": "edit", "resource": "*", "effect": "deny" },
+    { "action": "read", "resource": "{env:OPENCODE_WORKSPACE}/**", "effect": "allow" },
+    { "action": "edit", "resource": "{env:OPENCODE_WORKSPACE}/**", "effect": "allow" },
+    { "action": "read", "resource": "/tmp/**", "effect": "allow" },
+    { "action": "edit", "resource": "/tmp/**", "effect": "allow" },
+    { "action": "read", "resource": "/home/agent/.claude/**", "effect": "allow" },
+    { "action": "read", "resource": "/home/agent/.agents/**", "effect": "allow" },
+    { "action": "read", "resource": "/home/agent/.config/opencode/**", "effect": "allow" },
+    { "action": "read", "resource": "/etc/opencode/**", "effect": "allow" },
+    { "action": "read", "resource": "/var/log/opencode/**", "effect": "allow" },
+
+    // Shell stays usable inside the container boundary. The guard plugin
+    // blocks dangerous commands and the network is the real boundary.
+    { "action": "shell", "resource": "*", "effect": "allow" },
+    { "action": "glob", "resource": "*", "effect": "allow" },
+    { "action": "grep", "resource": "*", "effect": "allow" },
+    { "action": "webfetch", "resource": "*", "effect": "ask" },
+    { "action": "websearch", "resource": "*", "effect": "ask" },
+
+    // Protected paths: secrets, keys, vaults and local credential stores.
+    { "action": "read", "resource": "**/.env", "effect": "deny" },
+    { "action": "read", "resource": "**/.env.*", "effect": "deny" },
+    { "action": "edit", "resource": "**/.env", "effect": "deny" },
+    { "action": "edit", "resource": "**/.env.*", "effect": "deny" },
+    { "action": "read", "resource": "**/.ssh/**", "effect": "deny" },
+    { "action": "edit", "resource": "**/.ssh/**", "effect": "deny" },
+    { "action": "read", "resource": "**/id_rsa*", "effect": "deny" },
+    { "action": "read", "resource": "**/id_ed25519*", "effect": "deny" },
+    { "action": "read", "resource": "**/id_ecdsa*", "effect": "deny" },
+    { "action": "read", "resource": "**/*.pem", "effect": "deny" },
+    { "action": "read", "resource": "**/*.key", "effect": "deny" },
+    { "action": "read", "resource": "**/*.p12", "effect": "deny" },
+    { "action": "read", "resource": "**/*.pfx", "effect": "deny" },
+    { "action": "read", "resource": "**/auth.json", "effect": "deny" },
+    { "action": "edit", "resource": "**/auth.json", "effect": "deny" },
+    { "action": "read", "resource": "**/*.kdbx", "effect": "deny" },
+    { "action": "read", "resource": "**/age.key", "effect": "deny" },
+    { "action": "read", "resource": "**/age-key.txt", "effect": "deny" },
+    { "action": "read", "resource": "**/secrets.yaml", "effect": "deny" }
+  ],
+
+  // The only model provider is the local LiteLLM reverse proxy. The API key is
+  // a per-lease virtual key resolved by the launcher; root provider keys remain
+  // in LiteLLM and never enter this container.
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM (local)",
+      "options": {
+        "baseURL": "{env:LITELLM_BASE_URL}",
+        "apiKey": "{env:LITELLM_API_KEY}"
+      },
+      "models": {
+        "qwen-local": {
+          "name": "Qwen3.5 4B (local, via LiteLLM)",
+          "limit": { "context": 65536, "output": 8192 }
+        }
+      }
+    }
+  },
+
+  "model": "litellm/qwen-local"
+}

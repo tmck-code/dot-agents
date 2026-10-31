@@ -55,6 +55,14 @@ other agents.
   completion notification.
 - Never poll. No `sleep`, no `until [ -f <log>.status ]` loops, no timer loops.
 
+## Fix blocks
+
+- If a gate you ran still fails after your fix attempts (at most 2 rounds per
+  failing test), start the report with a fenced ```fix block per failure. Set
+  `needs_user: true` only when the fix needs a user or threshold decision.
+- Do not end your turn with a known fix that you have not applied
+  (`needs_user: false`, `status: proposed`). Apply it, or mark it.
+
 ## Context budget
 
 If the work cannot finish without the context getting very large (a hook warns),
