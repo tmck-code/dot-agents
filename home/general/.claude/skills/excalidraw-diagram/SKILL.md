@@ -563,6 +563,58 @@ Editable files use `#ffffff` as `viewBackgroundColor`. A cream scene background 
 
 See `references/element-templates.md` for copy-paste JSON templates for each element type (text, line, dot, rectangle, arrow). Pull colors from `references/color-palette.md` based on each element's semantic purpose.
 
+## Icons (`scripts/icon.py`)
+
+A library of 48 hand-drawn icons lives in `references/icons/` (one `.excalidraw` per icon, plus `index.json`).
+
+**When to use**
+- Technology logos for real systems (Postgres, Docker, GitHub, AWS).
+- Status markers instead of coloured text (`status-check`, `alert-cross`).
+- Avatars for actors and roles in sequence and flow diagrams (`person-*`).
+- `tmck-code`, `tmck-code-circle` and `tmck-code-square` are the user's personal avatar (the tmck-code icon on tmck-code.github.io). Use them for the user, the author, or "you" in a diagram, not for generic bots.
+- Device icons for clients (`laptop`, `phone`).
+
+**When not to use**
+- Do not decorate every box. Use one icon per concept.
+- Keep the icon next to or inside its container. Never replace the label with an icon.
+
+**Pick one**
+- `python3 scripts/icon.py list [query]` prints name, size and tags. The query matches names and tags.
+- Or view `references/icons/sheet.svg` (rebuild with `python3 scripts/icon.py sheet sheet.excalidraw`, then render it).
+
+**Insert one**
+
+```bash
+python3 scripts/icon.py add diagram.excalidraw postgresql --x 300 --y 620 --size 80 --label Postgres
+```
+
+- `--size` sets the larger dimension; `--width` and `--height` set one side. The default is native size.
+- Scaling is uniform. Every inserted element gets a new id, so the same icon can be added many times.
+- `--out path` writes a copy. `--id-prefix` prefixes new ids.
+- Icons are appended last, so they draw on top. Add them after the shapes they sit on.
+
+**Size guidance**
+- Inline markers: height about 1.5 to 2 times the body font size.
+- Standalone node icons: 80 to 120 px.
+- Status markers: 24 to 40 px.
+- Use one size per role across the diagram.
+
+**Grouping and images**
+- All elements of an icon share one `icon-<name>-<suffix>` group, so it moves as one unit.
+- Docker, GitHub, Buildkite and the tmck-code avatars embed an image file (merged into `files`). They render in Excalidraw+ and in the docker renderer.
+- `docker`, `postgresql`, `delta-lake`, `elasticsearch` and `databricks` share one style: the logo inside a 182 px outlined white circle. Use the same size for all of them in one diagram.
+
+| Family | Icons |
+|--------|-------|
+| status-* | `status-check`, `status-cross`, `status-info`, `status-question`, `status-warning` |
+| alert-* | `alert-check`, `alert-cross`, `alert-exclamation`, `alert-question` |
+| toggle / switch | `toggle-on`, `toggle-off`, `switch-on`, `switch-off`, `*-square` variants |
+| devices | `laptop`, `phone`, `cpu`, `cloud`, `database` |
+| logos | `postgresql`, `docker`, `github`, `buildkite`, `elasticsearch`, `databricks`, `delta-lake`, `aws-ecs`, `aws-s3`, `json` |
+| people / avatars | `person-cap`, `person-cap-outline`, `person-hat`, `person-lanyard`; user's own avatar: `tmck-code`, `tmck-code-circle`, `tmck-code-square` |
+| emoji | `emoji-crying`, `emoji-shocked`, `emoji-shocked-red` |
+| dials | `dial-1` to `dial-5` |
+
 ---
 
 ## Pushing to an Excalidraw+ Collection
@@ -761,3 +813,4 @@ docker build -t excalidraw-render .
 26. **Readable at export size**: Text is legible in the rendered PNG
 27. **Balanced composition**: No large empty voids or overcrowded regions
 28. **Spacing minimums**: Node gaps at least one node height (20 px between boxes in one top-aligned row); text padding at least 20 px horizontal by 12 px vertical; about 10 nodes or fewer per diagram
+29. **Icons render and match**: Every icon is visible in the PNG (no blank image boxes), sits next to its label, and icons of the same role share one size
