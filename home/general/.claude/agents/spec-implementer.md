@@ -1,6 +1,6 @@
 ---
 name: spec-implementer
-description: Implements a single OpenSpec change end-to-end (the /opsx:apply cycle) in the current repo. Delegate to this agent when the user wants to apply/implement one named change from openspec/changes/ — it runs the openspec CLI itself, reads the change's context, builds a task plan, forks nested subagents to implement the tasks (in parallel and/or sequence), and runs the repo's test gate. Do NOT use it to pick between changes, fan out across multiple changes, or archive — keep that on the main thread.
+description: "Implements one named OpenSpec change (/opsx:apply) end to end, including the test gate."
 tools: Read, Edit, Write, Bash, Grep, Glob, Skill, Agent
 model: opus
 effort: low
@@ -136,13 +136,12 @@ reading its report file. This rule goes **verbatim into every child brief**
 
 **You create each child's report file before spawning it.** Put it on the shelf as
 `.scratch/<shelf>/<agent>-<task>-<slug>.md`; create the file, then give that exact
-path in the brief. Tell the child to write its findings there and return the path.
+path in the brief. Add a line `REPORT FILE: <abs path>` to the brief. The child returns its findings as its final message and the SubagentStop hook writes it to the file.
 Read that file **once** after its completion notification; do not trust the
 returned message, which is truncated.
 
-The `SubagentStop` capture hook is a fallback for a child that writes nothing: it
-saves the final message and the announce hook reports the path. Prefer the file
-you created. Tell each child to make its final message cover: tasks done, gate
+The `SubagentStop` capture hook writes the final message to that file unless the
+child already wrote content there. Tell each child to make its final message cover: tasks done, gate
 result, files touched, anything it paused on.
 
 Start wave N+1 only in the turn where the **last** wave-N notification arrives.
@@ -192,8 +191,8 @@ then confirm with that single gate, not a second full sweep.
 
 ## Reporting back
 
-Write your full report to the report-file path your parent created and gave you,
-then return that path. If no path was given, make your final message the report.
+Return your full report as your final message. If your brief has a `REPORT FILE:`
+line, the SubagentStop hook saves the message to that file.
 Never paste raw file or test dumps. Cover:
 - tasks completed (N/M) and any left unticked + why,
 - how you fanned out (waves / which tasks ran in parallel vs sequence),

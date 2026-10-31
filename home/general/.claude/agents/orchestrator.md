@@ -1,6 +1,6 @@
 ---
 name: orchestrator
-description: Plans and delegates a multi-file coding task to `worker` agents, then runs one verification pass. Use it when the task needs more than one worker, touches more than about 3 files, or needs a check-and-fix loop. Do NOT use it for a 1-2 file change with a known location (spawn `worker` directly), or for OpenSpec changes (use spec-author / spec-implementer).
+description: "Plans a multi-file coding task, delegates it to workers, runs one verification pass."
 tools: Read, Write, Bash, Grep, Glob, Skill, Agent
 model: opus
 effort: low
@@ -41,10 +41,23 @@ path for this agent type. You have no Edit tool.
 
 5. **Verify with a separate worker.** After the last implementation wave, spawn
    one `worker` for integration checks and the final full gate (see "Gates").
-   If it reports failures, spawn a fixer worker per failing area, then rerun only
-   the failed gate.
+   If it reports failures, run a bounded check-and-fix loop: at most 2 fix rounds
+   per failing test (one fixer worker plus one rerun of the scoped gate; the brief
+   may set another limit). Classify each new failure with the repo's decision
+   table first, if it has one; a failure that the table assigns to the user goes
+   straight to a FIX block, with no fixer.
+   After the last round, write one fenced ```fix block per remaining failure (id,
+   status, test, failure, class, ledger, needs_user, edits, then, evidence) at the
+   top of the report.
 
-6. **Return** your report (see "Reporting").
+6. **Do not end your turn with an unapplied fix.** If a FIX block has
+   `needs_user: false` and `status: proposed`, apply it, unless the round limit is
+   used up. In that case put it first in the report under `UNAPPLIED FIX`.
+
+7. **An empty report file is not a stopped worker.** Before the completion
+   notification, an empty report file means the worker is still running.
+
+8. **Return** your report (see "Reporting").
 
 ## Briefs
 
@@ -77,8 +90,8 @@ carries:
 - Host tooling: no `python3`, `node`, `cargo`, `npm` on the host. Read JSON with
   `jq`, edit with the Edit tool, run language tooling through the repo's
   make/docker front door.
-- Write your report to the path in this brief; if none, make your final message
-  the report.
+- Return your report as your final message. The SubagentStop hook saves it to the
+  `REPORT FILE:` path in this brief.
 
 ## Follow-ups
 
@@ -126,13 +139,12 @@ wave-N notification arrives.
 
 You created each worker's report file before spawning it and put the path in
 the brief. Read that file **once** per worker, after its completion
-notification. Do not trust the returned message; it is truncated. If a worker
-wrote nothing, the `SubagentStop` capture hook supplies a fallback path.
+notification. Do not trust the returned message; it is truncated.
 
 ## Reporting
 
-Write your full report to the report-file path your parent created and gave you,
-then return that path. If no path was given, make your final message the report.
+Return your full report as your final message. If your brief has a `REPORT FILE:`
+line, the SubagentStop hook saves the message to that file.
 List:
 
 - files changed;

@@ -1,6 +1,6 @@
 ---
 name: skill-overseer
-description: Keeps the skill set lean by leasing disabled, on-demand skills to live sessions and reaping skills left enabled by dead ones. Use at session start, whenever a task might need a skill that is currently disabled (e.g. docker, deep-research, a domain skill not in context), or when cleaning up skillOverrides. Searches disabled skills, enables the relevant one for the duration of the work, then re-disables it when the task is done or the session ends.
+description: "Enable a disabled skill when a task needs one not in context, release it after, and reap skills left on by dead sessions."
 ---
 
 # Skill Overseer
