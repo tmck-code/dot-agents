@@ -8,14 +8,11 @@ scratch shelf --
 
     .scratch/<shelf>/<agent>-<task>-<slug>.md
 
--- and puts that exact path in the brief. The subagent writes its findings there
-and returns the path. Because the file already exists and the parent created it,
-the subagent is not asking the harness to create a report file of its own, which
-is what used to be refused.
-
-The SubagentStop capture hook remains the fallback for a child that writes
-nothing: it saves the final message to a scratchpad file and the PostToolUse
-announce hook reports the path. If that fires, prefer the file you created.
+-- and puts that exact path in the brief on a `REPORT FILE: <abs path>` line. The
+subagent returns its findings as its final message. The SubagentStop capture hook
+(subagent-report-capture.py) writes that message to the file, unless the subagent
+already wrote content there. The hook also saves a copy to a scratchpad file and the
+PostToolUse announce hook reports that path.
 
 Unlike nudge-delegate.py, this one does NOT stay silent for subagent-originated
 calls: the convention must hold at EVERY nesting level, so nested children that
@@ -51,13 +48,11 @@ def main() -> int:
         'Subagent-handoff reminder: YOU create the report file before spawning. '
         'Pick a unique path on the scratch shelf, '
         '`.scratch/<shelf>/<agent>-<task>-<slug>.md`, create it, and put that exact '
-        'path in the brief. Tell the subagent to write its findings there and return '
-        'the path. Do not ask it to invent a report filename: the file already exists, '
-        'so it is editing a file you own the naming of, not asking the harness to '
-        'create a report. If the write is still refused, the subagent should end with '
-        'its findings as its FINAL MESSAGE; the capture hook saves that and the '
-        'announce hook gives you the path. Read the file you created (or the captured '
-        'fallback) rather than acting on the returned message: the notification '
+        'path in the brief on a line `REPORT FILE: <abs path>`. The subagent returns its '
+        'full findings as its FINAL MESSAGE; the SubagentStop hook writes that message '
+        'to the file (unless the subagent already wrote content there). Do not ask it '
+        'to invent a report filename. Read the file you created '
+        'rather than acting on the returned message: the notification '
         'channel truncates long returns and drops some entirely. Pass the same '
         'convention down to any children it spawns. '
         'Sole-writer reminder: if this agent EDITS files, tell it that it is the only '
