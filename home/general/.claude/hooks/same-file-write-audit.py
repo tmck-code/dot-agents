@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 WINDOW_S = 180.0     # how long a prior write stays 'live' for collision purposes
-STATE_DIR = Path.home() / '.claude' / 'hooks' / 'state'
+STATE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'hooks' / 'state'
 
 
 def writer_id(data: dict) -> str:

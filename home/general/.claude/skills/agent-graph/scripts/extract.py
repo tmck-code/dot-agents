@@ -39,15 +39,30 @@ def die(msg, code=1):
     sys.exit(code)
 
 
+def config_roots():
+    """Candidate Claude config dirs: $CLAUDE_CONFIG_DIR first, then ~/.claude.personal, ~/.claude."""
+    home = os.path.expanduser('~')
+    roots = [os.environ.get('CLAUDE_CONFIG_DIR') or '',
+             os.path.join(home, '.claude.personal'), os.path.join(home, '.claude')]
+    seen, out = set(), []
+    for r in roots:
+        key = os.path.realpath(r) if r else ''
+        if r and key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 def default_project_dir():
     """Derive the transcript project dir from $PWD (/ -> -)."""
     enc = os.getcwd().replace('/', '-')
-    for base in ('.claude.personal', '.claude'):
-        cand = os.path.join(os.path.expanduser('~'), base, 'projects', enc)
+    roots = config_roots()
+    for base in roots:
+        cand = os.path.join(base, 'projects', enc)
         if os.path.isdir(cand):
             return cand
-    # fall back to the personal path even if missing (clearer error later)
-    return os.path.join(os.path.expanduser('~'), '.claude.personal', 'projects', enc)
+    # fall back to the first candidate even if missing (clearer error later)
+    return os.path.join(roots[0], 'projects', enc)
 
 
 def load_jsonl(path):
@@ -375,9 +390,9 @@ class Filters:
 
 
 def iter_project_dirs():
-    'Yield every transcript project dir under the personal + fallback roots.'
-    for base in ('.claude.personal', '.claude'):
-        root = os.path.join(os.path.expanduser('~'), base, 'projects')
+    'Yield every transcript project dir under $CLAUDE_CONFIG_DIR + fallback roots.'
+    for base in config_roots():
+        root = os.path.join(base, 'projects')
         if not os.path.isdir(root):
             continue
         for name in sorted(os.listdir(root)):

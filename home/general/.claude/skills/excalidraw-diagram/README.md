@@ -49,8 +49,13 @@ The generator scripts can also be run directly:
 
 ```bash
 python3 scripts/convert.py diagram.mmd diagram.excalidraw        # Mermaid to Excalidraw
-python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]
+python3 scripts/convert.py diagram.mmd diagram.excalidraw --format min          # ER: "full" (default) or "min" (no examples or group containers)
+python3 scripts/convert.py diagram.mmd diagram.excalidraw --no-examples       # ER: ignore "%% example" rows (kept; "min" covers it)
+python3 -I scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]
+python3 scripts/xychart.py ... --legend "Signups,Churn"                    # series names
 ```
+
+Examples: `example-flowchart`, `example-sequence`, `example-erd`, `example-erd-min`, `example-gantt`, `example-pie`, `example-xychart`.
 
 ## Customize Colors
 
@@ -70,3 +75,7 @@ excalidraw-diagram/
     render_template.html            # Browser template for rendering
     pyproject.toml                  # Python dependencies (playwright)
 ```
+
+## Icons
+
+`references/icons/` holds 48 reusable icons (status markers, logos, avatars, devices, dials), one `.excalidraw` scene each plus `index.json`. Image-based icons embed their file. Use `python3 scripts/icon.py list [query]`, `add <diagram> <icon> --x X --y Y [--size S] [--label TEXT]`, or `sheet <out.excalidraw>` to build a contact sheet (render it to `references/icons/sheet.svg`). The source is the Excalidraw+ icon scene `2iWPETFJuU0`; to refresh the library, fetch that scene with the API (`GET /api/v1/scenes/2iWPETFJuU0/content`) and run `python3 scripts/extract_icons.py scene.json`.

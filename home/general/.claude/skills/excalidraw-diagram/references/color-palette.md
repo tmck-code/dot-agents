@@ -84,6 +84,15 @@ For code snippets and data examples inside technical diagrams. These dark boxes 
 
 ---
 
+## Shadow
+
+| Property | Value |
+|----------|-------|
+| Shadow fill and stroke | The node's stroke color (never a separate grey) |
+| Opacity | 80 |
+
+---
+
 ## Background
 
 | Property | Value |

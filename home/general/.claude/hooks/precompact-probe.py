@@ -2,7 +2,7 @@
 '''PreCompact probe: log every compaction event to learn what the hook sees.
 
 Fires on PreCompact (manual + auto). Appends one JSON line per event to
-~/.claude/hooks/state/precompact-log.jsonl capturing the FULL raw stdin payload
+$CLAUDE_CONFIG_DIR (default ~/.claude)/hooks/state/precompact-log.jsonl capturing the FULL raw stdin payload
 plus a wall-clock stamp, so we can empirically confirm:
   - whether subagent compactions fire this hook at all;
   - whether agent_id / agent_type are populated for subagent events
@@ -12,11 +12,12 @@ plus a wall-clock stamp, so we can empirically confirm:
 Non-blocking and fail-safe: any parse/IO hiccup exits cleanly, emits nothing.
 '''
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
-LOG = Path.home() / '.claude' / 'hooks' / 'state' / 'precompact-log.jsonl'
+LOG = Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude') / 'hooks' / 'state' / 'precompact-log.jsonl'
 
 
 def main() -> int:

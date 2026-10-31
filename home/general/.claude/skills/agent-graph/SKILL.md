@@ -24,7 +24,8 @@ scripts/build_spa.py sessions/             →  agent-graph.html (dynamic loader
 ## Workflow
 
 1. **Find the session.** Transcripts live in
-   `~/.claude.personal/projects/<encoded-cwd>/` (fallback `~/.claude/projects/`);
+   `$CLAUDE_CONFIG_DIR/projects/<encoded-cwd>/` (fallbacks `~/.claude.personal/projects/`,
+   then `~/.claude/projects/`);
    the encoded cwd replaces `/` with `-`. List candidates (sessions with agent
    spawns, newest first):
 

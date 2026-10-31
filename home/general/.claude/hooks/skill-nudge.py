@@ -13,12 +13,14 @@ the nudge marks it and instructs Claude to enable it first (overseer.py enable
 is disabled the message reads exactly as it did before.
 
 Routing table resolution (UNION, not override — both contribute):
-  1. ~/.claude/skill-routing.json                         (global, generic skills)
+  1. $CLAUDE_CONFIG_DIR/skill-routing.json                (global, generic skills)
   2. $CLAUDE_PROJECT_DIR/.claude/skill-routing.json        (repo-specific skills)
 
 Override resolution (project overrides user, per-skill — both optional/guarded):
-  1. ~/.claude/settings.local.json                        (user skillOverrides)
+  1. $CLAUDE_CONFIG_DIR/settings.local.json               (user skillOverrides)
   2. $CLAUDE_PROJECT_DIR/.claude/settings.local.json       (project skillOverrides)
+
+$CLAUDE_CONFIG_DIR falls back to ~/.claude when unset.
 
 Table schema:
   { "rules": [ { "skill": "<name>", "match": "<regex>",
@@ -31,8 +33,12 @@ import sys
 from pathlib import Path
 
 
+def config_dir() -> Path:
+    return Path(os.environ.get('CLAUDE_CONFIG_DIR') or Path.home() / '.claude')
+
+
 def load_rules() -> list:
-    paths = [Path.home() / '.claude' / 'skill-routing.json']
+    paths = [config_dir() / 'skill-routing.json']
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '')
     if project_dir:
         paths.append(Path(project_dir) / '.claude' / 'skill-routing.json')
@@ -49,7 +55,7 @@ def load_rules() -> list:
 
 def load_overrides() -> dict:
     '''Effective skillOverrides map: user first, project wins per-key.'''
-    paths = [Path.home() / '.claude' / 'settings.local.json']
+    paths = [config_dir() / 'settings.local.json']
     project_dir = os.environ.get('CLAUDE_PROJECT_DIR', '')
     if project_dir:
         paths.append(Path(project_dir) / '.claude' / 'settings.local.json')
@@ -92,7 +98,7 @@ def main() -> int:
         return 0
 
     overrides = load_overrides()
-    overseer = 'python3 "$HOME/.claude/skills/skill-overseer/scripts/overseer.py"'
+    overseer = 'python3 "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/skill-overseer/scripts/overseer.py"'
 
     lines = []
     for skill, hint in hits:

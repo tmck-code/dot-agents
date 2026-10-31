@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Render an .excalidraw file through the optional Excalidraw sidecar.
+#
+#   excalidraw-render diagram.excalidraw
+#   excalidraw-render diagram.excalidraw -o diagram.png --transparent
+#   excalidraw-render diagram.excalidraw -o diagram.svg
+#
+# The sidecar must be running: from the host, `make excalidraw-up`.
+set -euo pipefail
+
+URL="${EXCALIDRAW_RENDER_URL:-http://excalidraw:8080}"
+input=""
+output=""
+format="png"
+format_set=0
+scale=1
+width=1920
+transparent=false
+dark=false
+timeout=180
+
+usage() {
+  cat <<'EOF'
+Usage: excalidraw-render INPUT [-o OUTPUT] [options]
+
+  -o, --output PATH   Output file (default: input stem + .png/.svg)
+  --format png|svg    Output format (default: infer from -o, else png)
+  --scale N           Device scale factor, 1-4 (default: 1)
+  --width N           Max viewport width (default: 1920)
+  --transparent       Transparent PNG background
+  --dark              Dark-mode render
+  -h, --help          Show this help
+
+Environment:
+  EXCALIDRAW_RENDER_URL   Sidecar URL (default: http://excalidraw:8080)
+EOF
+}
+
+die() { echo "excalidraw-render: $*" >&2; exit 1; }
+
+while (($#)); do
+  case "$1" in
+    -o|--output) output="${2:?--output needs a value}"; shift 2 ;;
+    --format) format="${2:?--format needs a value}"; format_set=1; shift 2 ;;
+    --scale) scale="${2:?--scale needs a value}"; shift 2 ;;
+    --width) width="${2:?--width needs a value}"; shift 2 ;;
+    --transparent) transparent=true; shift ;;
+    --dark) dark=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) die "unknown option: $1" ;;
+    *) [[ -z "$input" ]] || die "only one input file is supported"; input="$1"; shift ;;
+  esac
+done
+
+[[ -n "$input" ]] || { usage >&2; exit 2; }
+[[ -f "$input" ]] || die "input not found: $input"
+case "$format" in png|svg) ;; *) die "--format must be png or svg" ;; esac
+
+if [[ -z "$output" ]]; then
+  output="${input%.*}.$format"
+elif (( ! format_set )) && [[ "$output" == *.svg ]]; then
+  format="svg"
+elif (( ! format_set )) && [[ "$output" == *.png ]]; then
+  format="png"
+fi
+
+query="format=${format}&scale=${scale}&width=${width}&transparent=${transparent}&dark=${dark}"
+curl -fsS --max-time "$timeout" \
+  -H "Content-Type: application/json" \
+  --data-binary @"$input" \
+  "${URL%/}/render?${query}" \
+  -o "$output"
+echo "$output"

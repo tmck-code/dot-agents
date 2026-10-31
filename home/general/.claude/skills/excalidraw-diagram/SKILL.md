@@ -400,17 +400,20 @@ apply to pure charts (pie, xychart-beta) or mindmaps.
 - **Background/async job boxes** (a Databricks job, a queue worker, any
   "runs later / not inline" process box): use a dashed stroke on a palette
   fill. Do not use a black or dark fill.
-- **Offset shadow**: behind every filled node rectangle that holds text, add a
-  duplicate rectangle with the same size and roundness, offset +6 px in x and
-  y. Set its `backgroundColor` and `strokeColor` both to the shape's stroke
-  color, `fillStyle: "solid"`, `strokeWidth: 1`, `opacity: 80`. It has no text
-  and no bindings. It shares the shape's `groupIds`. Place it immediately
-  before its shape in `elements`, with an `index` that sorts just before the
-  shape's. Skip legend swatches, full-width bands, the bottom summary box, and
-  dashed or unfilled shapes. Any filled shape type that holds text gets a
-  shadow (not only rectangles). To add shadows in bulk:
-  `python3 scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]`.
-  The script skips legend swatches (size 26x20).
+- **Offset shadow**: `scripts/shadow.py` exposes
+  `add_shadows(elements, offset=6, opacity=80) -> list`. CLI:
+  `python3 -I scripts/shadow.py in.excalidraw out.excalidraw [--offset 6] [--opacity 80]`.
+  Rule: a rectangle, diamond or ellipse gets a shadow when its fill is not
+  transparent, its stroke is solid, it is not a 26x20 legend swatch, and it has
+  a bound text child or `customData.shadow: true`. Set `customData.shadow: false`
+  to opt out. Each shadow carries `customData.shadowOf` (the node id). The
+  script is idempotent, so running it twice adds no second shadow. The shadow is
+  the same shape offset +6 px in x and y. Its `backgroundColor` and
+  `strokeColor` are the node's stroke color, with `fillStyle: "solid"`,
+  `strokeWidth: 1`, `opacity: 80`. It is inserted just before its node, with an
+  `index` lower than the node's. `convert.py` applies shadows once, in
+  `document()`. Pie and xychart output is excluded. For hand-written JSON, see
+  the Shadow template in `references/element-templates.md`.
 - **Legend**: every diagram has one, top-right by default. If that area holds a
   node, arrow or header, use the nearest free corner. One 26x20 swatch per concept,
   with its label in `#868e96`. Swatches have no shadow.
@@ -539,12 +542,78 @@ Editable files use `#ffffff` as `viewBackgroundColor`. A cream scene background 
 - Draw lifelines as narrow rectangles so arrows can bind to them. Or use lines split around labels.
 - Put notes above the lifelines.
 - Loop and par frames are dashed `#868e96` rectangles with a tab label.
-- Actor boxes appear only at the top.
-- Return arrows are dashed, not dotted.
+- Actors are drawn as stick figures, at the top only.
+- Return messages are dashed, not dotted.
+- `activate`/`deactivate` and the `->>+` / `-->>-` shorthand draw activation bars on the lifeline.
+
+## Generated Diagram Types (`scripts/convert.py`)
+
+- **Flowchart**: nodes have shadows. Edge labels have a white background.
+- **Class and ER tables**: one shadow sits behind the whole table box.
+- **ER format**: `--format full|min` (default `full`). `full` uses a grid layout with up to 3 entities per row. Relationship lines run in the gaps between cells and rows. `min` is a compact grid. It uses the same grid code with tighter gaps. It has up to 3 entities per row, or 4 when there are 9 or more entities. It draws entity tables and small caption tags only. It has no group containers and no example tables. Group members stay next to each other and keep the group header colour. Each caption tag sits above its entity. `--no-examples` is kept for compatibility. `--format min` already covers it. Note: `--no-examples` alone still draws group containers; `min` does not.
+- **ER example rows**: add `%% example Entity: v1 | v2 | v3` lines, one per row. Values follow the attribute order. The entity is matched by id or label. Rows are padded or truncated to the attribute count. `min` ignores them. In `full`, the table sits below its entity. It has a thin grid, a header row, a mono font, a curved connector and an "example" caption.
+- **ER groups**: `%% group <Name> [color=<name>]: A, B`. In `full`, the group is a dashed, tinted container with no shadow. In both formats it sets the header colour of its entities. Colours: blue, green, orange, yellow, red, purple, indigo, gray. Without `color=`, colours cycle. Group members are placed in adjacent grid cells. A group that does not fit in the rest of a row starts a new row, so containers never overlap.
+- **ER notes**: `%% note <Entity or Group>: text` adds a caption tag. It works in both formats.
+- **ER commands**: `python3 -I scripts/convert.py --format full example-erd.mmd example-erd.excalidraw`, and `--format min example-erd.mmd example-erd-min.excalidraw`.
+- **Pie**: `scripts/pie.py`, run through `convert.py`. Wedges start at 12 o'clock, go clockwise, largest first. Fills are saturated, with a darker outline of the same hue. Label text colour follows fill luminance. There is no legend. Inside labels are `name` and `(pct%)`. With `showData` they are `name: value` and `(pct%)`. Percentages under 10% show one decimal. Small wedges get a plain leader line to an outside label, coloured as the wedge stroke. The title is size 28, fontFamily 5. `%% subtitle: text` adds a size-16 grey subtitle. No shadows.
+- **Gantt**: task bars have shadows. Status colors: done green, active blue, crit red, milestone amber. The legend lists only the statuses used. There is no Today marker (`todayMarker` is ignored).
+- **Xychart**: `xychart.py` takes `--legend "Signups,Churn"` for series names. See `example-xychart.mmd`. It draws no shadows.
 
 ## Element Templates
 
 See `references/element-templates.md` for copy-paste JSON templates for each element type (text, line, dot, rectangle, arrow). Pull colors from `references/color-palette.md` based on each element's semantic purpose.
+
+## Icons (`scripts/icon.py`)
+
+A library of 48 hand-drawn icons lives in `references/icons/` (one `.excalidraw` per icon, plus `index.json`).
+
+**When to use**
+- Technology logos for real systems (Postgres, Docker, GitHub, AWS).
+- Status markers instead of coloured text (`status-check`, `alert-cross`).
+- Avatars for actors and roles in sequence and flow diagrams (`person-*`).
+- `tmck-code`, `tmck-code-circle` and `tmck-code-square` are the user's personal avatar (the tmck-code icon on tmck-code.github.io). Use them for the user, the author, or "you" in a diagram, not for generic bots.
+- Device icons for clients (`laptop`, `phone`).
+
+**When not to use**
+- Do not decorate every box. Use one icon per concept.
+- Keep the icon next to or inside its container. Never replace the label with an icon.
+
+**Pick one**
+- `python3 scripts/icon.py list [query]` prints name, size and tags. The query matches names and tags.
+- Or view `references/icons/sheet.svg` (rebuild with `python3 scripts/icon.py sheet sheet.excalidraw`, then render it).
+
+**Insert one**
+
+```bash
+python3 scripts/icon.py add diagram.excalidraw postgresql --x 300 --y 620 --size 80 --label Postgres
+```
+
+- `--size` sets the larger dimension; `--width` and `--height` set one side. The default is native size.
+- Scaling is uniform. Every inserted element gets a new id, so the same icon can be added many times.
+- `--out path` writes a copy. `--id-prefix` prefixes new ids.
+- Icons are appended last, so they draw on top. Add them after the shapes they sit on.
+
+**Size guidance**
+- Inline markers: height about 1.5 to 2 times the body font size.
+- Standalone node icons: 80 to 120 px.
+- Status markers: 24 to 40 px.
+- Use one size per role across the diagram.
+
+**Grouping and images**
+- All elements of an icon share one `icon-<name>-<suffix>` group, so it moves as one unit.
+- Docker, GitHub, Buildkite and the tmck-code avatars embed an image file (merged into `files`). They render in Excalidraw+ and in the docker renderer.
+- `docker`, `postgresql`, `delta-lake`, `elasticsearch` and `databricks` share one style: the logo inside a 182 px outlined white circle. Use the same size for all of them in one diagram.
+
+| Family | Icons |
+|--------|-------|
+| status-* | `status-check`, `status-cross`, `status-info`, `status-question`, `status-warning` |
+| alert-* | `alert-check`, `alert-cross`, `alert-exclamation`, `alert-question` |
+| toggle / switch | `toggle-on`, `toggle-off`, `switch-on`, `switch-off`, `*-square` variants |
+| devices | `laptop`, `phone`, `cpu`, `cloud`, `database` |
+| logos | `postgresql`, `docker`, `github`, `buildkite`, `elasticsearch`, `databricks`, `delta-lake`, `aws-ecs`, `aws-s3`, `json` |
+| people / avatars | `person-cap`, `person-cap-outline`, `person-hat`, `person-lanyard`; user's own avatar: `tmck-code`, `tmck-code-circle`, `tmck-code-square` |
+| emoji | `emoji-crying`, `emoji-shocked`, `emoji-shocked-red` |
+| dials | `dial-1` to `dial-5` |
 
 ---
 
@@ -744,3 +813,4 @@ docker build -t excalidraw-render .
 26. **Readable at export size**: Text is legible in the rendered PNG
 27. **Balanced composition**: No large empty voids or overcrowded regions
 28. **Spacing minimums**: Node gaps at least one node height (20 px between boxes in one top-aligned row); text padding at least 20 px horizontal by 12 px vertical; about 10 nodes or fewer per diagram
+29. **Icons render and match**: Every icon is visible in the PNG (no blank image boxes), sits next to its label, and icons of the same role share one size

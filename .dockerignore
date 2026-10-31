@@ -1,0 +1,23 @@
+# Repository-level build context hygiene (used if the image is built from the
+# repo root instead of docker/opencode/).
+.git
+.scratch
+.env
+.env.*
+*.kdbx
+*.kdbx.key
+auth.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.log
+audit.jsonl
+lease-token
+lease-admin.token
+node_modules/
+docs/
+agent-graph.html
+**/__pycache__/
+**/.pytest_cache/
+**/.ruff_cache/

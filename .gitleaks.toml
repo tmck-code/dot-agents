@@ -1,0 +1,13 @@
+# gitleaks configuration. The generated SPA embeds base64 SVG diagrams, which
+# can look like high-entropy blobs; the sources and rendered files are static
+# and contain no credentials. Everything else is scanned normally.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Generated documentation and diagram assets"
+paths = [
+  '''docs/opencode-secure-stack\.html''',
+  '''docs/opencode-sandboxing\.html''',
+  '''docs/diagrams/''',
+]

@@ -11,6 +11,8 @@ import math
 import re
 import uuid
 
+from shadow import add_shadows
+
 FONT_FAMILY = 8  # Comic Shanns, as in the hand-drawn reference
 LABEL_FONT = 18.0
 EDGE_LABEL_FONT = 12.0
@@ -568,6 +570,7 @@ def make_cluster(group):
     title = _text(group.title, tx, ty, tw, th,
                   CLUSTER_TITLE_COLOR, CLUSTER_TITLE_FONT, align="left",
                   family=CLUSTER_TITLE_FAMILY)
+    box["customData"] = {"shadow": False}
     return [box, title]
 
 
@@ -786,8 +789,50 @@ def _route_clear(a, b, edge, obstacles, bbox):
     return points
 
 
+def _anchor_segment(points):
+    """The segment a label belongs to: the middle one, or for an odd point
+    count the longer of the two segments meeting at the middle vertex."""
+    n = len(points)
+    if n % 2 == 0:
+        return points[n // 2 - 1], points[n // 2]
+    m = n // 2
+    first, second = (points[m - 1], points[m]), (points[m], points[m + 1])
+
+    def length(sg):
+        return abs(sg[1][0] - sg[0][0]) + abs(sg[1][1] - sg[0][1])
+    return first if length(first) >= length(second) else second
+
+
+def _beside_position(points, label_w, label_h, avoid):
+    """Top-left of a label placed beside its anchor segment: left or right of
+    a vertical one (whichever side is free), above a horizontal one."""
+    (x0, y0), (x1, y1) = _anchor_segment(points)
+    cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+    gap = 6.0
+    if abs(x1 - x0) > abs(y1 - y0):
+        cands = [(cx - label_w / 2.0, cy - gap - label_h),
+                 (cx - label_w / 2.0, cy + gap)]
+    else:
+        cands = [(cx + gap, cy - label_h / 2.0),
+                 (cx - gap - label_w, cy - label_h / 2.0)]
+    boxes = list(avoid) + list(_LABELS)
+    segs = [sg for pl in _PLACED + [points] for sg in zip(pl, pl[1:])]
+    for x, y in cands:
+        box = (x, y, x + label_w, y + label_h)
+        if any(not (box[2] < b[0] or box[0] > b[2] or box[3] < b[1] or box[1] > b[3])
+               for b in boxes):
+            continue
+        if any(_seg_in_box(sg, box) for sg in segs):
+            continue
+        return x, y
+    return cands[0]
+
+
 def make_edge(a, b, edge, style, obstacles, bbox):
     points = _route_clear(a, b, edge, obstacles, bbox)
+    avoid = [(n.x, n.y, n.x + n.width, n.y + n.height) for n in (a, b)]
+    avoid += [(x0 + ROUTE_MARGIN, y0 + ROUTE_MARGIN, x1 - ROUTE_MARGIN, y1 - ROUTE_MARGIN)
+              for x0, y0, x1, y1 in obstacles]
     sx, sy = points[0]
     ex, ey = points[-1]
     stroke = style.get("stroke", EDGE_COLOR)
@@ -809,23 +854,22 @@ def make_edge(a, b, edge, style, obstacles, bbox):
         startIsSpecial=None, endIsSpecial=None,
     )
     els = [arrow]
+    lbox = None
     if edge["label"]:
         label_w, label_h = edge_label_size(edge["label"])
-        # excalidraw centres a bound label on the middle of the point list
-        bx0, by0, bx1, by1 = _label_midpoint(points, label_w, label_h)
-        lx, ly = (bx0 + bx1) / 2.0, (by0 + by1) / 2.0
+        lx0, ly0 = _beside_position(points, label_w, label_h, avoid)
+        lbox = (lx0, ly0, lx0 + label_w, ly0 + label_h)
+        # unbound: a bound label is re-centred on the arrow by excalidraw,
+        # which puts the text on top of the line
         label = _text(
-            edge["label"], lx - label_w / 2.0, ly - label_h / 2.0,
-            label_w, label_h,
+            edge["label"], lx0, ly0, label_w, label_h,
             EDGE_LABEL_COLOR, EDGE_LABEL_FONT, valign="middle",
         )
-        label["containerId"] = arrow["id"]
-        arrow["boundElements"].append({"type": "text", "id": label["id"]})
+        label["backgroundColor"] = "#ffffff"
         els.append(label)
     _PLACED.append(points)
-    if edge["label"]:
-        _LABELS.append((lx - label_w / 2.0, ly - label_h / 2.0,
-                        lx + label_w / 2.0, ly + label_h / 2.0))
+    if lbox:
+        _LABELS.append(lbox)
     return els
 
 
@@ -931,4 +975,4 @@ def convert_flowchart(text):
             by_id[node.shape_id]["boundElements"] += [
                 {"id": aid, "type": "arrow"} for aid in bound[node.id]
             ]
-    return elements
+    return add_shadows(elements)

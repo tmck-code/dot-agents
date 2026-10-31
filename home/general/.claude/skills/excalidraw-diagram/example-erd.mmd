@@ -1,4 +1,22 @@
 erDiagram
+    %% group Content color=blue: DOCUMENTS, SNAPSHOTS, LINKS
+    %% group Ingest color=green: SOURCES, CRAWLS, SCHEDULES
+    %% group Operations color=orange: ERRORS, WORKERS
+    %% note Content: Pages we keep and their fetched copies.
+    %% note Ingest: Where pages come from and when we crawl them.
+    %% note Operations: Failures and the workers that run crawls.
+    %% note SOURCES: Each source is crawled on a schedule.
+    %% note CRAWLS: One row per crawl run.
+    %% example DOCUMENTS: 1 | 2026-01-04 | 2026-01-09 | 9f2c1a | /a | {} | 2026-01-09 | 1
+    %% example DOCUMENTS: 2 | 2026-01-05 | 2026-01-05 | 77be03 | /b | {} | 2026-01-05 | 2
+    %% example SNAPSHOTS: 10 | 2026-01-09 | 2026-01-09 | /a | 9f2c1a | <html> | 2026-01-09 | 1
+    %% example LINKS: 7 | /a | /b | 1
+    %% example SOURCES: 1 | docs | https://docs.example | true
+    %% example SOURCES: 2 | blog | https://blog.example | false
+    %% example CRAWLS: 5 | 2026-01-09 | 120 | ok | 1
+    %% example SCHEDULES: 1 | 0 3 * * * | true | 1
+    %% example ERRORS: 3 | 503 | timeout | 5
+    %% example WORKERS: 1 | crawler-1 | idle | 2026-01-09
     DOCUMENTS["documents"] {
         integer id PK
         datetime(tz) created_at
@@ -19,11 +37,48 @@ erDiagram
         datetime(tz) last_fetched_at
         integer document_id FK
     }
+    LINKS["links"] {
+        integer id PK
+        varchar(2048) from_url
+        varchar(2048) to_url
+        integer document_id FK
+    }
     SOURCES["sources"] {
         integer id PK
         varchar(255) name UK
         varchar(2048) base_url
         boolean enabled
     }
+    CRAWLS["crawls"] {
+        integer id PK
+        datetime(tz) started_at
+        integer pages
+        varchar(16) status
+        integer source_id FK
+    }
+    SCHEDULES["schedules"] {
+        integer id PK
+        varchar(64) cron
+        boolean active
+        integer source_id FK
+    }
+    ERRORS["errors"] {
+        integer id PK
+        integer http_status
+        varchar(255) message
+        integer crawl_id FK
+    }
+    WORKERS["workers"] {
+        integer id PK
+        varchar(64) name UK
+        varchar(16) state
+        datetime(tz) heartbeat_at
+        integer crawl_id FK
+    }
     DOCUMENTS ||--o{ SNAPSHOTS : "fetched from"
+    DOCUMENTS ||--o{ LINKS : "links out"
     SOURCES |o..o{ DOCUMENTS : "publishes"
+    CRAWLS }o--|| SOURCES : "run for"
+    SCHEDULES ||--o| SOURCES : "triggers"
+    CRAWLS ||--o{ ERRORS : "logs"
+    WORKERS }o--o{ CRAWLS : "executes"

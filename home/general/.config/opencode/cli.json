@@ -1,0 +1,32 @@
+{
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "diffs": {
+    "wrap": "word",
+    "view": "auto"
+  },
+  "session": {
+    "sidebar": "hide",
+    "scrollbar": true,
+    "thinking": "show",
+    "verbosity": "medium",
+    "image_preview": true
+  },
+  "animations": true,
+  "plugins": [
+    "/home/freman/dev/yet-another-statusline/.scratch/feat-opencode-statusline/yas-lite"
+  ],
+  "tabs": {
+    "layout": "horizontal",
+    "indicators": "status"
+  },
+  "scroll": {
+    "acceleration": true
+  },
+  "attention": {
+    "notifications": true,
+    "sound": true
+  },
+  "debug": {
+    "devtools": false
+  }
+}
