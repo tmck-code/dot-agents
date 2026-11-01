@@ -86,6 +86,15 @@ if (( want_down && want_status )); then
   exit 2
 fi
 
+# A missing image otherwise surfaces only after the stack and lease are ready.
+if (( ! want_help && ! want_down && ! want_status )); then
+  image="${IMAGE:-opencode-dev:local}"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "OpenCode image '$image' is missing; building it first..." >&2
+    make -C "$docker_dir" build
+  fi
+fi
+
 if (( want_help )); then
   usage
   echo
