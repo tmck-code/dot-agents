@@ -80,7 +80,8 @@ Or, after `./deploy.sh linux|osx`, the same launcher is on `~/bin`:
 
 ```
 cd ~/dev/some-project
-opencode-docker --stack          # first run: start the safe stack + lease
+opencode-docker --stack          # first run: start the safe stack + online lease
+opencode-docker --stack-local    # or start the optional local llama.cpp model
 opencode-docker
 opencode-docker --shell
 opencode-docker run "summarise this repo"
@@ -89,7 +90,9 @@ opencode-docker --down           # stop the safe stack (--down --volumes wipes s
 ```
 
 It mounts the git root of `$PWD` at the same absolute path inside the
-container. `--stack` starts the documented safe stack and approves a lease, then
+container. `--stack` starts the documented safe stack and approves a lease for
+an online model (`OPENCODE_MODEL`, default `litellm/deepseek-chat`);
+`--stack-local` does the same for the profile-gated llama.cpp model, then
 launches. `REPO_ROOT=/path` overrides the mount; `--unsafe` is for trusted
 debugging only.
 

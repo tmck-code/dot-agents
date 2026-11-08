@@ -28,6 +28,7 @@ const PROTECTED = [
   /\.(?:pem|key|p12|pfx|kdbx)$/i,
   /(^|\/)(?:auth\.json|age\.key|age-key\.txt|secrets\.ya?ml|credentials)$/i,
   /(^|\/)\.gnupg(?:\/|$)/,
+  /(^|\/)(?:\.credentials\.json|\.claude\.json|history\.jsonl)$/,
 ]
 
 const DANGEROUS =

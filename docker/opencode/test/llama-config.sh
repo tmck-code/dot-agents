@@ -39,7 +39,7 @@ grep -q 'model_name: qwen-local' stack/litellm.yaml \
   || fail "LiteLLM alias qwen-local missing"
 grep -q 'api_base: http://llama:8080/v1' stack/litellm.yaml \
   || fail "LiteLLM alias must point at llama:8080"
-grep -q 'claude-sonnet,claude-opus,gpt-mini,deepseek-chat,qwen-local' stack/docker-compose.yml \
+grep -q 'claude-sonnet,claude-opus,gpt-mini,deepseek-chat,deepseek-reasoner,qwen-local' stack/docker-compose.yml \
   || fail "broker LITELLM_MODELS default must include qwen-local"
 grep -q '"qwen-local"' config/opencode.jsonc \
   || fail "OpenCode qwen-local entry missing"
@@ -47,13 +47,8 @@ grep -q '"context": 65536' config/opencode.jsonc \
   || fail "OpenCode qwen-local context must be 65536"
 grep -q '"output": 8192' config/opencode.jsonc \
   || fail "OpenCode qwen-local output must be 8192"
-grep -q '"model": "litellm/qwen-local"' config/opencode.jsonc \
-  || fail "qwen-local must be the default OpenCode model"
-for model in claude-sonnet claude-opus gpt-mini deepseek-chat; do
-  if grep -q "\"$model\":" config/opencode.jsonc; then
-    fail "non-local model $model must not be listed in the OpenCode catalogue"
-  fi
-done
+grep -q '"model": "{env:OPENCODE_MODEL}"' config/opencode.jsonc \
+  || fail "OpenCode default model must come from OPENCODE_MODEL"
 [[ -x stack/llama.sh ]] || fail "stack/llama.sh must be executable"
 grep -q '^llama-up:' Makefile || fail "Makefile llama-up target missing"
 grep -q '^llama-down:' Makefile || fail "Makefile llama-down target missing"

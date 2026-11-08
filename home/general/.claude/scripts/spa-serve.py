@@ -2,7 +2,7 @@
 '''Serve the newest SPA over the LAN so a phone or laptop can open it.
 
 A session that runs over ssh cannot hand out `file:///` URLs. This starts a
-detached `python3 -m http.server` bound to 0.0.0.0, serving the directory that
+detached Range-capable static server (spa_range_server.py) bound to 0.0.0.0, serving the directory that
 holds the SPA, and prints the LAN URL.
 
     spa-serve.py [FILE] [-p PORT] [-r ROOT] [--bind ADDR]
@@ -250,7 +250,7 @@ def serve(args):
     with log_path.open('ab') as log:
         proc = subprocess.Popen(
             [
-                sys.executable, '-m', 'http.server', str(port),
+                sys.executable, str(Path(__file__).resolve().with_name('spa_range_server.py')), str(port),
                 '--bind', args.bind, '--directory', str(root),
             ],
             cwd=root,

@@ -25,15 +25,15 @@ def _url(base: str, path: str) -> str:
 def create_virtual_key(
     *,
     base_url: str,
-    master_key: str,
+    keygen_key: str,
     lease_id: str,
     models: list[str],
     budget_usd: float | None,
     duration_seconds: int,
     timeout: float = 15.0,
 ) -> str:
-    if not master_key:
-        raise LiteLLMError("LITELLM_MASTER_KEY is not configured", 503)
+    if not keygen_key:
+        raise LiteLLMError("LITELLM_KEYGEN_KEY is not configured", 503)
     body: dict[str, Any] = {
         "key_alias": f"lease-{lease_id}",
         "duration": f"{max(60, duration_seconds)}s",
@@ -45,7 +45,7 @@ def create_virtual_key(
     try:
         response = httpx.post(
             _url(base_url, "/key/generate"),
-            headers={"Authorization": f"Bearer {master_key}"},
+            headers={"Authorization": f"Bearer {keygen_key}"},
             json=body,
             timeout=timeout,
         )
@@ -64,16 +64,16 @@ def create_virtual_key(
 def delete_virtual_key(
     *,
     base_url: str,
-    master_key: str,
+    keygen_key: str,
     key: str,
     timeout: float = 15.0,
 ) -> bool:
-    if not master_key or not key:
+    if not keygen_key or not key:
         return False
     try:
         response = httpx.post(
             _url(base_url, "/key/delete"),
-            headers={"Authorization": f"Bearer {master_key}"},
+            headers={"Authorization": f"Bearer {keygen_key}"},
             json={"keys": [key]},
             timeout=timeout,
         )

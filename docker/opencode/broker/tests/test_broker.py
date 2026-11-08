@@ -28,7 +28,7 @@ def settings(tmp_path):
         github_installation_id="99",
         github_private_key_file=str(pem),
         litellm_url="http://litellm.test:4000",
-        litellm_master_key="master-key",
+        litellm_keygen_key="keygen-key",
         litellm_models=("claude-sonnet",),
         refresh_skew_seconds=300,
     )
@@ -253,3 +253,184 @@ def test_qwen_local_lease_passes_model_allowlist(clients, monkeypatch):
     assert lease["models"] == ["qwen-local"]
     assert calls and calls[0]["models"] == ["qwen-local"]
     assert calls[0]["lease_id"] == lease["lease_id"]
+
+
+ADMIN = {"X-Admin-Token": ADMIN_TOKEN}
+
+
+def _grant(admin, lease, service="excalidraw", **overrides):
+    body = {"service": service, "ttl_seconds": 600, "values": {"TOKEN": "sekret-xyz"}}
+    body.update(overrides)
+    return admin.post(
+        f"/v1/leases/{lease['lease_id']}/grants", json=body, headers=ADMIN
+    )
+
+
+def test_settings_read_secrets_from_files(tmp_path, monkeypatch):
+    admin_file = tmp_path / "admin"
+    admin_file.write_text("  admin-from-file \n")
+    key_file = tmp_path / "key"
+    key_file.write_text("sk-keygen\n")
+    monkeypatch.setenv("BROKER_ADMIN_TOKEN_FILE", str(admin_file))
+    monkeypatch.setenv("LITELLM_KEYGEN_KEY_FILE", str(key_file))
+    loaded = Settings.from_env()
+    assert loaded.admin_token == "admin-from-file"
+    assert loaded.litellm_keygen_key == "sk-keygen"
+
+
+def test_events_are_streamed_as_json(clients, monkeypatch, capsys):
+    admin, agent, _ = clients
+    lease = _create(admin)
+    monkeypatch.setattr(
+        github,
+        "mint_installation_token",
+        lambda **_: {
+            "token": "ghs_stream_secret",
+            "expires_at": iso(utcnow() + timedelta(hours=1)),
+        },
+    )
+    agent.get("/v1/token/github", headers=_auth(lease["lease_token"]))
+    out = capsys.readouterr().out
+    lines = [line for line in out.splitlines() if line.strip()]
+    assert len(lines) >= 2
+    keys = ["component", "detail", "event", "lease_id", "outcome", "repo", "ts"]
+    records = [json.loads(line) for line in lines]
+    for record in records:
+        assert sorted(record) == keys
+        assert record["outcome"] in {"ok", "deny", "error", "warn"}
+    assert {r["event"] for r in records} >= {"lease.create", "github.mint"}
+    assert records[0]["repo"] == "owner/repo"
+    assert "ghs_stream_secret" not in out
+    assert lease["lease_token"] not in out
+
+
+def test_admin_token_mismatch_records_event(clients):
+    admin, _, store = clients
+    response = admin.get("/v1/leases", headers={"X-Admin-Token": "wrong"})
+    assert response.status_code == 401
+    events = [e for e in store.events() if e["action"] == "admin.auth"]
+    assert events and events[0]["result"] == "deny"
+
+
+def test_grant_adds_service_to_running_lease(clients):
+    admin, agent, _ = clients
+    lease = _create(admin)
+    response = _grant(admin, lease)
+    assert response.status_code == 200
+    assert "values" not in response.json()
+    assert "sekret-xyz" not in response.text
+    fetched = agent.get("/v1/token/excalidraw", headers=_auth(lease["lease_token"]))
+    assert fetched.status_code == 200
+    assert fetched.json()["values"] == {"TOKEN": "sekret-xyz"}
+    view = admin.get(f"/v1/leases/{lease['lease_id']}", headers=ADMIN).json()
+    assert [g["service"] for g in view["grants"]] == ["excalidraw"]
+    assert "sekret-xyz" not in json.dumps(view)
+
+
+def test_grant_ttl_is_clamped_to_lease(clients):
+    admin, _, _ = clients
+    lease = _create(admin, ttl_seconds=600)
+    grant = _grant(admin, lease, ttl_seconds=1800).json()
+    remaining = (
+        datetime.fromisoformat(grant["expires_at"].replace("Z", "+00:00"))
+        - datetime.now(timezone.utc)
+    ).total_seconds()
+    assert 500 < remaining <= 600
+
+
+def test_grant_ttl_is_clamped_to_max(clients):
+    admin, _, _ = clients
+    lease = _create(admin, ttl_seconds=86400)
+    grant = _grant(admin, lease, ttl_seconds=86400).json()
+    remaining = (
+        datetime.fromisoformat(grant["expires_at"].replace("Z", "+00:00"))
+        - datetime.now(timezone.utc)
+    ).total_seconds()
+    assert 3500 < remaining <= 3600
+
+
+@pytest.mark.parametrize("name", ["github", "litellm", "all", "Bad", "x"])
+def test_reserved_service_name_is_rejected(clients, name):
+    admin, _, _ = clients
+    lease = _create(admin)
+    assert _grant(admin, lease, service=name).status_code == 422
+
+
+def test_grant_on_revoked_lease_conflicts(clients):
+    admin, _, store = clients
+    lease = _create(admin)
+    admin.post(f"/v1/leases/{lease['lease_id']}/revoke", headers=ADMIN)
+    assert _grant(admin, lease).status_code == 409
+    assert store.list_grants(lease["lease_id"]) == []
+
+
+def test_expired_grant_is_denied_and_cleared(clients, settings):
+    admin, agent, store = clients
+    lease = _create(admin)
+    store.grant(
+        lease["lease_id"],
+        "excalidraw",
+        {"TOKEN": "old-secret"},
+        utcnow() - timedelta(seconds=1),
+    )
+    response = agent.get("/v1/token/excalidraw", headers=_auth(lease["lease_token"]))
+    assert response.status_code == 403
+    import sqlite3
+
+    conn = sqlite3.connect(settings.db_path)
+    row = conn.execute("SELECT secret_json, status FROM grants").fetchone()
+    assert row == (None, "expired")
+
+
+def test_revoke_clears_grants(clients, settings):
+    admin, agent, _ = clients
+    lease = _create(admin)
+    _grant(admin, lease)
+    admin.post(f"/v1/leases/{lease['lease_id']}/revoke", headers=ADMIN)
+    response = agent.get("/v1/token/excalidraw", headers=_auth(lease["lease_token"]))
+    assert response.status_code == 403
+    import sqlite3
+
+    conn = sqlite3.connect(settings.db_path)
+    assert conn.execute("SELECT secret_json FROM grants").fetchone() == (None,)
+
+
+def test_ungrant_only_removes_one(clients):
+    admin, agent, _ = clients
+    lease = _create(admin)
+    _grant(admin, lease, service="excalidraw")
+    _grant(admin, lease, service="other-svc", values={"TOKEN": "two"})
+    removed = admin.delete(
+        f"/v1/leases/{lease['lease_id']}/grants/excalidraw", headers=ADMIN
+    )
+    assert removed.status_code == 200
+    headers = _auth(lease["lease_token"])
+    assert agent.get("/v1/token/excalidraw", headers=headers).status_code == 403
+    assert agent.get("/v1/token/other-svc", headers=headers).status_code == 200
+
+
+def test_generic_route_does_not_shadow_github(clients, monkeypatch):
+    admin, agent, _ = clients
+    lease = _create(admin)
+    monkeypatch.setattr(
+        github,
+        "mint_installation_token",
+        lambda **_: {
+            "token": "ghs_literal",
+            "expires_at": iso(utcnow() + timedelta(hours=1)),
+        },
+    )
+    response = agent.get("/v1/token/github", headers=_auth(lease["lease_token"]))
+    assert response.status_code == 200
+    assert response.json()["token"] == "ghs_literal"
+
+
+def test_grant_values_never_in_events(clients, capsys):
+    admin, agent, store = clients
+    lease = _create(admin)
+    _grant(admin, lease)
+    agent.get("/v1/token/excalidraw", headers=_auth(lease["lease_token"]))
+    assert "sekret-xyz" not in json.dumps(store.events())
+    assert "sekret-xyz" not in capsys.readouterr().out
+    issued = [e for e in store.events() if e["action"] == "token.issue"]
+    assert issued and json.loads(issued[0]["detail"]) == {"service": "excalidraw"}

@@ -52,4 +52,22 @@ echo "egress-bypass: github allowed"
 echo "egress-bypass: denied domain through the proxy"
 expect_fail "unlisted domain" 'curl -x http://squid:3128 -fsS --max-time 10 https://example.com -o /dev/null'
 
+echo "egress-bypass: private and loopback destinations through the proxy"
+for target in https://10.0.0.1 https://127.0.0.1 https://172.31.250.1; do
+  expect_fail "proxy to $target" "curl -x http://squid:3128 -fsS --max-time 10 $target -o /dev/null"
+done
+
+echo "egress-bypass: narrowed Google domain"
+expect_fail "storage.googleapis.com" 'curl -x http://squid:3128 -fsS --max-time 10 https://storage.googleapis.com -o /dev/null'
+agent 'curl -x http://squid:3128 -sS --max-time 20 https://generativelanguage.googleapis.com -o /dev/null'
+echo "egress-bypass: generativelanguage.googleapis.com allowed"
+
+echo "egress-bypass: rule order"
+deny_line="$(grep -n '^http_access deny blocked_dst$' stack/squid.conf | head -1 | cut -d: -f1)"
+allow_line="$(grep -n '^http_access allow localnet' stack/squid.conf | head -1 | cut -d: -f1)"
+if [[ -z "$deny_line" || -z "$allow_line" || "$deny_line" -ge "$allow_line" ]]; then
+  echo "egress-bypass: deny blocked_dst must precede allow localnet in squid.conf" >&2
+  exit 1
+fi
+
 echo "egress-bypass: ok"

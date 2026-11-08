@@ -6,6 +6,9 @@ the internal agent network. Every request needs the admin token.
 
 from __future__ import annotations
 
+import hmac
+import re
+from datetime import timedelta
 from typing import Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -13,9 +16,11 @@ from pydantic import BaseModel, Field
 
 from . import litellm
 from .settings import Settings
-from .store import Store
+from .store import Store, is_active, parse_iso, utcnow
 
 SERVICES = {"github", "litellm", "all"}
+RESERVED_SERVICES = frozenset({"github", "litellm", "all"})
+SERVICE_NAME = re.compile(r"^[a-z][a-z0-9-]{1,31}$")
 
 
 class LeaseRequest(BaseModel):
@@ -28,8 +33,16 @@ class LeaseRequest(BaseModel):
     budget_usd: float | None = None
 
 
-def _view(lease: dict[str, Any]) -> dict[str, Any]:
-    return {
+class GrantRequest(BaseModel):
+    service: str
+    ttl_seconds: int | None = None
+    values: dict[str, str] = Field(default_factory=dict)
+
+
+def _view(
+    lease: dict[str, Any], grants: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
+    view = {
         key: lease[key]
         for key in (
             "lease_id",
@@ -45,6 +58,11 @@ def _view(lease: dict[str, Any]) -> dict[str, Any]:
             "last_used_at",
         )
     }
+    view["grants"] = [
+        {"service": grant["service"], "expires_at": grant["expires_at"]}
+        for grant in grants or []
+    ]
+    return view
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -58,12 +76,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None,
     )
     app.state.settings = settings
+    store.component = "broker-admin"
     app.state.store = store
 
     def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
         if not settings.admin_token:
             raise HTTPException(status_code=503, detail="admin token is not configured")
-        if not x_admin_token or x_admin_token != settings.admin_token:
+        supplied = (x_admin_token or "").encode()
+        if not x_admin_token or not hmac.compare_digest(
+            supplied, settings.admin_token.encode()
+        ):
+            store.event(None, "admin.auth", "deny", {})
             raise HTTPException(status_code=401, detail="invalid admin token")
 
     @app.get("/healthz")
@@ -109,7 +132,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 key = litellm.create_virtual_key(
                     base_url=settings.litellm_url,
-                    master_key=settings.litellm_master_key,
+                    keygen_key=settings.litellm_keygen_key,
                     lease_id=lease["lease_id"],
                     models=models,
                     budget_usd=body.budget_usd,
@@ -132,14 +155,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/v1/leases", dependencies=[Depends(require_admin)])
     def list_leases() -> dict[str, Any]:
-        return {"leases": [_view(lease) for lease in store.list_active()]}
+        return {
+            "leases": [
+                _view(lease, store.list_grants(lease["lease_id"]))
+                for lease in store.list_active()
+            ]
+        }
 
     @app.get("/v1/leases/{lease_id}", dependencies=[Depends(require_admin)])
     def get_lease(lease_id: str) -> dict[str, Any]:
         lease = store.get(lease_id)
         if not lease:
             raise HTTPException(status_code=404, detail="lease not found")
-        return _view(lease)
+        return _view(lease, store.list_grants(lease_id))
 
     @app.post("/v1/leases/{lease_id}/revoke", dependencies=[Depends(require_admin)])
     def revoke_lease(lease_id: str) -> dict[str, Any]:
@@ -149,14 +177,67 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if lease.get("litellm_key"):
             litellm.delete_virtual_key(
                 base_url=settings.litellm_url,
-                master_key=settings.litellm_master_key,
+                keygen_key=settings.litellm_keygen_key,
                 key=lease["litellm_key"],
                 timeout=settings.request_timeout_seconds,
             )
         lease = store.revoke(lease_id)
         store.clear_credentials(lease_id)
+
         assert lease is not None
-        return _view(lease)
+        return _view(lease, [])
+
+    @app.post(
+        "/v1/leases/{lease_id}/grants", dependencies=[Depends(require_admin)]
+    )
+    def create_grant(lease_id: str, body: GrantRequest) -> dict[str, Any]:
+        if body.service in RESERVED_SERVICES or not SERVICE_NAME.match(body.service):
+            raise HTTPException(
+                status_code=422,
+                detail="service must match ^[a-z][a-z0-9-]{1,31}$ and not be reserved",
+            )
+        if not body.values:
+            raise HTTPException(status_code=422, detail="values must not be empty")
+        lease = store.get(lease_id)
+        if not lease:
+            raise HTTPException(status_code=404, detail="lease not found")
+        if not is_active(lease):
+            raise HTTPException(status_code=409, detail="lease is not active")
+        requested = body.ttl_seconds or settings.default_grant_ttl_seconds
+        if requested <= 0:
+            raise HTTPException(status_code=422, detail="ttl_seconds must be positive")
+        now = utcnow()
+        remaining = (parse_iso(lease["expires_at"]) - now).total_seconds()
+        ttl = min(requested, settings.max_grant_ttl_seconds, int(remaining))
+        grant = store.grant(
+            lease_id,
+            body.service,
+            body.values,
+            now + timedelta(seconds=ttl),
+            now=now,
+        )
+        store.event(
+            lease_id,
+            "lease.grant",
+            "ok",
+            {
+                "service": body.service,
+                "grant_id": grant["grant_id"],
+                "expires_at": grant["expires_at"],
+            },
+        )
+        return grant
+
+    @app.delete(
+        "/v1/leases/{lease_id}/grants/{service}",
+        dependencies=[Depends(require_admin)],
+    )
+    def delete_grant(lease_id: str, service: str) -> dict[str, Any]:
+        if not store.get(lease_id):
+            raise HTTPException(status_code=404, detail="lease not found")
+        if not store.revoke_grant(lease_id, service):
+            raise HTTPException(status_code=404, detail="grant not found")
+        store.event(lease_id, "lease.ungrant", "ok", {"service": service})
+        return {"lease_id": lease_id, "service": service, "status": "revoked"}
 
     return app
-

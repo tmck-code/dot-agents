@@ -13,7 +13,10 @@
 #   LLAMA_CTX_SIZE    65536 by default.
 #   LLAMA_SESSION     Lease session name (default: $USER-llama).
 #   LLAMA_TTL         Lease TTL (default: 1h).
-#   LEASE_ADMIN_TOKEN Admin token; also read from stack/secrets/stack.env.
+#   LEASE_ADMIN_TOKEN_FILE  Set to stack/secrets/broker-admin.token by this script.
+#   OPENCODE_SESSION_ID     Lease session id; used before LLAMA_SESSION when set.
+#   OPENCODE_EGRESS_SUBNET  Egress network subnet; must be inside 10/8, 172.16/12
+#                           or 192.168/16.
 set -euo pipefail
 
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
@@ -77,39 +80,18 @@ resolve_model() {
   echo "llama: model $LLAMA_MODEL_PATH"
 }
 
-set_env_value() {
-  local key="$1" value="$2" file="stack/secrets/stack.env"
-  if grep -q "^${key}=" "$file"; then
-    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
-  else
-    printf '%s=%s\n' "$key" "$value" >> "$file"
-  fi
-}
-
 ensure_stack_env() {
-  local file="stack/secrets/stack.env"
-  mkdir -p stack/secrets
-  chmod 700 stack/secrets
-  if [[ -f "$file" ]]; then
-    # shellcheck disable=SC1090
+  # shellcheck disable=SC1091
+  . stack/lib/secrets.sh
+  validate_egress_subnet || exit 1
+  ensure_stack_secrets stack/secrets
+  if [[ -f stack/secrets/stack.env ]]; then
     set -a
-    . "$file"
+    # shellcheck disable=SC1091
+    . stack/secrets/stack.env
     set +a
-  else
-    umask 077
-    : > "$file"
-    chmod 600 "$file"
   fi
-  if [[ -z "${BROKER_ADMIN_TOKEN:-}" ]]; then
-    BROKER_ADMIN_TOKEN="$(openssl rand -hex 32)"
-    set_env_value BROKER_ADMIN_TOKEN "$BROKER_ADMIN_TOKEN"
-  fi
-  if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
-    LITELLM_MASTER_KEY="sk-$(openssl rand -hex 32)"
-    set_env_value LITELLM_MASTER_KEY "$LITELLM_MASTER_KEY"
-  fi
-  export BROKER_ADMIN_TOKEN LITELLM_MASTER_KEY
-  export LEASE_ADMIN_TOKEN="${LEASE_ADMIN_TOKEN:-$BROKER_ADMIN_TOKEN}"
+  export LEASE_ADMIN_TOKEN_FILE="$PWD/stack/secrets/broker-admin.token"
 }
 
 load_admin_token() {
@@ -118,7 +100,7 @@ load_admin_token() {
 
 approve_lease() {
   load_admin_token
-  local session="${LLAMA_SESSION:-${USER:-agent}-llama}"
+  local session="${OPENCODE_SESSION_ID:-${LLAMA_SESSION:-${USER:-agent}-llama}}"
   local ttl="${LLAMA_TTL:-1h}"
   echo "llama: approving a qwen-local lease (session=$session ttl=$ttl)"
   ./bin/lease approve \
@@ -129,8 +111,9 @@ approve_lease() {
   cat <<EOF
 
 llama: local model is ready.
-  OpenCode default: litellm/qwen-local
-  Only qwen-local is listed; cloud aliases are not in the OpenCode catalogue.
+  OpenCode model: litellm/qwen-local
+  Launch with:    OPENCODE_MODEL=litellm/qwen-local make run
+  Or switch in the TUI: /model litellm/qwen-local
 EOF
 }
 
@@ -152,6 +135,7 @@ cmd_up() {
   local args=("${BASE[@]}" --profile llama)
   ((gpu)) && args+=("${GPU_OVERRIDE[@]}")
   "${args[@]}" up -d --wait
+  register_keygen_key stack/secrets/litellm-keygen.key
   if ((no_lease)); then
     echo "llama: started without a lease; run ./stack/llama.sh lease when ready"
     return 0
@@ -181,10 +165,9 @@ cmd_status() {
   health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' opencode-llama)"
   echo "llama: health=$health"
   if [[ "$health" == "healthy" ]]; then
-    local key="${LLAMA_API_KEY:-sk-llama-local}"
-    docker exec opencode-llama curl -fsS \
-      -H "Authorization: Bearer $key" \
-      http://127.0.0.1:8080/v1/models \
+    # The key is read from the secret file inside the container, so it is never
+    # in the host argv.
+    docker exec opencode-llama sh -c 'curl -fsS -H "Authorization: Bearer $(cat /run/secrets/llama_api_key)" http://127.0.0.1:8080/v1/models' \
       | jq -r '.data[0] | "llama: model=\(.id) context=\(.meta.n_ctx) train=\(.meta.n_ctx_train)"' 2>/dev/null \
       || true
     docker exec opencode-llama sh -c 'nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader' 2>/dev/null \
