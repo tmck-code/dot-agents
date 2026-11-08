@@ -17,6 +17,15 @@ It runs as a non-root `agent` user built with your host UID/GID.
 
 ## Safe mode is the default
 
+![Isolation architecture: host, agent network and stack services](docs/diagrams/isolation-architecture.png)
+
+The second diagram shows one session from lease approval to merge, including
+an on-demand service token grant.
+
+![Session and token grant sequence](docs/diagrams/session-and-grants.png)
+
+Sources: `docs/diagrams/*.mmd` (Mermaid) and `*.excalidraw`.
+
 `run.sh` now starts the agent on an internal-only Docker network with a local
 security stack around it:
 
