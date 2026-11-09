@@ -26,8 +26,8 @@ ARG OPENCODE_VERSION=2.1.4
 #   make build OPENCODE_SHA256=<sha256>
 ARG OPENCODE_SHA256=
 ARG PYTHON_VERSION=3.13
-ARG UID=1000
-ARG GID=1000
+ARG UID=60917
+ARG GID=60917
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Runtime and build toolchain. Several packages are needed to compile Python

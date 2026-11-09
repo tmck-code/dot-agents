@@ -4,8 +4,8 @@ OPENCODE_VERSION ?= 2.1.4
 #   make build OPENCODE_SHA256=<sha256-of-opencode-binary>
 OPENCODE_SHA256 ?=
 PYTHON_VERSION ?= 3.13
-UID ?= $(shell id -u)
-GID ?= $(shell id -g)
+UID ?= 60917
+GID ?= 60917
 
 HOST_ARCH := $(shell docker version --format '{{.Server.Arch}}' 2>/dev/null)
 ifeq ($(strip $(HOST_ARCH)),)
@@ -14,10 +14,10 @@ endif
 HOST_PLATFORM ?= linux/$(HOST_ARCH)
 REPO_ROOT ?= $(shell git -C $(CURDIR) rev-parse --show-toplevel 2>/dev/null || echo $(CURDIR))
 
-# Published multi-arch images must not inherit the build machine's user. Override
-# these when building for a different owner; local `make build` uses the host ID.
-PUBLISH_UID ?= 1000
-PUBLISH_GID ?= 1000
+# The agent uid is fixed so rootless user namespaces map it predictably. Override
+# these only when building for a different owner.
+PUBLISH_UID ?= 60917
+PUBLISH_GID ?= 60917
 
 LABELS = \
 	--label org.opencontainers.image.title="OpenCode dev image" \
@@ -42,7 +42,10 @@ PUBLISH_BUILD_ARGS = \
 
 .PHONY: build run shell test test-legacy test-hardening test-egress test-stack \
 	test-broker test-guardrails test-worktree test-unsafe test-no-secrets \
-	test-llama-config test-llama llama-up llama-lease llama-status llama-logs llama-down \
+	test-stack-secrets test-secrets-routing test-rootless-check test-review \
+	test-docker-args test-lease-grant test-opencode-log \
+	test-online-config test-llama-config test-llama llama-up llama-lease llama-status llama-logs llama-down \
+	online-up online-lease online-status online-logs online-down \
 	excalidraw-up excalidraw-down test-excalidraw test-all build-multi clean help
 
 ## build: build for this host's architecture and load it into Docker
@@ -108,6 +111,38 @@ test-unsafe:
 test-no-secrets:
 	IMAGE=$(IMAGE) ./test/no-secrets.sh
 
+## test-stack-secrets: static per-service secret grants and resource limits (no stack)
+test-stack-secrets:
+	./test/stack-secrets.sh
+
+## test-secrets-routing: opencode-secrets.sh routes values to the per-service files
+test-secrets-routing:
+	./test/opencode-secrets-routing.sh
+
+## test-rootless-check: isolation backend detection and the --allow-rootful fence
+test-rootless-check:
+	IMAGE=$(IMAGE) ./test/rootless-check.sh
+
+## test-review: run.sh review lists changes without running session-clone config
+test-review:
+	./test/review.sh
+
+## test-docker-args: OPENCODE_DOCKER_ARGS rejects isolation-weakening flags
+test-docker-args:
+	IMAGE=$(IMAGE) ./test/docker-args.sh
+
+## test-lease-grant: lease grant/ungrant request bodies keep values out of argv
+test-lease-grant:
+	./test/lease-grant.sh
+
+## test-opencode-log: pytest coverage for opencode-log pretty
+test-opencode-log:
+	uv run --with pytest --with 'laser-prynter @ git+https://github.com/tmck-code/laser-prynter.git' pytest -q test/test_opencode_log.py
+
+## test-online-config: static checks for the online model catalogue (no stack)
+test-online-config:
+	./test/online-config.sh
+
 ## test-llama-config: static checks for the optional local model (no model/GPU)
 test-llama-config:
 	./test/llama-config.sh
@@ -116,6 +151,28 @@ test-llama-config:
 test-llama:
 	LLAMA_MODEL_PATH="$(LLAMA_MODEL_PATH)" LLAMA_GPU="$(LLAMA_GPU)" \
 		IMAGE=$(IMAGE) ./test/llama-smoke.sh
+
+## online-up: start the base stack and approve a lease for an online model
+online-up:
+	OPENCODE_MODEL="$(OPENCODE_MODEL)" OPENCODE_MODEL_TTL="$(OPENCODE_MODEL_TTL)" \
+		./stack/online.sh up
+
+## online-lease: approve another lease for the online model
+online-lease:
+	OPENCODE_MODEL="$(OPENCODE_MODEL)" OPENCODE_MODEL_TTL="$(OPENCODE_MODEL_TTL)" \
+		./stack/online.sh lease
+
+## online-status: show the base stack containers
+online-status:
+	./stack/online.sh status
+
+## online-logs: follow LiteLLM logs
+online-logs:
+	./stack/online.sh logs
+
+## online-down: stop the base stack, keep named volumes
+online-down:
+	./stack/online.sh down
 
 ## llama-up: resolve qwen3.5, start the llama profile and approve a lease
 llama-up:
@@ -150,10 +207,12 @@ test-excalidraw:
 	IMAGE=$(IMAGE) ./test/excalidraw-renderer.sh
 
 ## test-all: every suite that does not need a running production lease
-test-all: test-legacy test-hardening test-broker test-guardrails test-worktree test-unsafe test-llama-config
+test-all: test-legacy test-hardening test-broker test-guardrails test-worktree test-unsafe test-no-secrets \
+	test-stack-secrets test-secrets-routing test-rootless-check test-review test-docker-args \
+	test-lease-grant test-opencode-log test-online-config test-llama-config
 
 # usage: make build-multi PUSH_IMAGE=registry.example.com/you/opencode-dev:2.1.4
-## build-multi: build amd64+arm64 with SBOM/provenance and push (UID/GID 1000:1000)
+## build-multi: build amd64+arm64 with SBOM/provenance and push (UID/GID 60917:60917)
 build-multi:
 	@test -n "$(PUSH_IMAGE)" || { \
 		echo "error: build-multi needs PUSH_IMAGE=<registry>/<name>:<tag>"; \

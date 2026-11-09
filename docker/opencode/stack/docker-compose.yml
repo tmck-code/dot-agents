@@ -1,7 +1,7 @@
 # Local-only security stack for the hardened OpenCode launcher.
 #
 #   opencode-agent  (internal: true)  agent, squid, broker, litellm
-#   opencode-egress (bridge)          squid, broker, broker-admin, litellm
+#   opencode-egress (bridge)          squid, broker-admin, litellm
 #
 # The agent is attached to the internal network only. Squid is the only generic
 # egress path; LiteLLM is the only model-provider path; the broker is the only
@@ -15,6 +15,10 @@ networks:
   opencode-egress:
     name: opencode-egress
     driver: bridge
+    # Pinned so the gateway address is known and Squid can deny it (blocked_dst).
+    ipam:
+      config:
+        - subnet: "${OPENCODE_EGRESS_SUBNET:-172.31.250.0/24}"
   # Model-key state only. The agent is not attached, so it cannot reach the
   # LiteLLM database directly.
   opencode-data:
@@ -29,11 +33,46 @@ volumes:
   litellm-db:
     name: opencode-litellm-db
 
+# One file per secret; each service lists only the secrets it needs.
+secrets:
+  github_app_pem:
+    file: ./secrets/github-app.pem
+  litellm_keygen_key:
+    file: ./secrets/litellm-keygen.key
+  broker_admin_token:
+    file: ./secrets/broker-admin.token
+  litellm_master_key:
+    file: ./secrets/litellm-master.key
+  litellm_env:
+    file: ./secrets/litellm.env
+  postgres_password:
+    file: ./secrets/postgres-password
+  llama_api_key:
+    file: ./secrets/llama-api-key
+
+x-broker-env: &broker-env
+  BROKER_DB: /state/broker.db
+  BROKER_DEFAULT_TTL_SECONDS: ${BROKER_DEFAULT_TTL_SECONDS:-28800}
+  BROKER_MAX_TTL_SECONDS: ${BROKER_MAX_TTL_SECONDS:-86400}
+  BROKER_DEFAULT_GRANT_TTL_SECONDS: ${BROKER_DEFAULT_GRANT_TTL_SECONDS:-900}
+  BROKER_MAX_GRANT_TTL_SECONDS: ${BROKER_MAX_GRANT_TTL_SECONDS:-3600}
+  BROKER_REFRESH_SKEW_SECONDS: ${BROKER_REFRESH_SKEW_SECONDS:-300}
+  GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+  GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
+  GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
+  GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
+  LITELLM_URL: http://litellm:4000
+  LITELLM_KEYGEN_KEY_FILE: /run/secrets/litellm_keygen_key
+  LITELLM_MODELS: ${LITELLM_MODELS:-claude-sonnet,claude-opus,gpt-mini,deepseek-chat,deepseek-reasoner,qwen-local}
+
 x-broker: &broker
   image: opencode-lease-broker:local
   build:
     context: ../broker
     dockerfile: Dockerfile
+  # Secret files are mode 0600 and owned by the host user, so the broker must
+  # run as that user to read them. broker-state-init gives it the state volume.
+  user: "${OPENCODE_UID:-1000}:${OPENCODE_GID:-1000}"
   restart: unless-stopped
   read_only: true
   tmpfs:
@@ -44,20 +83,7 @@ x-broker: &broker
     - ALL
   volumes:
     - broker-state:/state
-    - ./secrets:/run/secrets:ro
-  environment:
-    BROKER_DB: /state/broker.db
-    BROKER_ADMIN_TOKEN: ${BROKER_ADMIN_TOKEN:-}
-    BROKER_DEFAULT_TTL_SECONDS: ${BROKER_DEFAULT_TTL_SECONDS:-28800}
-    BROKER_MAX_TTL_SECONDS: ${BROKER_MAX_TTL_SECONDS:-86400}
-    BROKER_REFRESH_SKEW_SECONDS: ${BROKER_REFRESH_SKEW_SECONDS:-300}
-    GITHUB_APP_ID: ${GITHUB_APP_ID:-}
-    GITHUB_INSTALLATION_ID: ${GITHUB_INSTALLATION_ID:-}
-    GITHUB_APP_PRIVATE_KEY_FILE: /run/secrets/github-app.pem
-    GITHUB_API_URL: ${GITHUB_API_URL:-https://api.github.com}
-    LITELLM_URL: http://litellm:4000
-    LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
-    LITELLM_MODELS: ${LITELLM_MODELS:-claude-sonnet,claude-opus,gpt-mini,deepseek-chat,qwen-local}
+  environment: *broker-env
 
 services:
   squid:
@@ -83,6 +109,9 @@ services:
       - DAC_OVERRIDE
       - SETGID
       - SETUID
+    pids_limit: ${SQUID_PIDS_LIMIT:-256}
+    mem_limit: ${SQUID_MEMORY:-512m}
+    cpus: ${SQUID_CPUS:-1}
     healthcheck:
       test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/3128'"]
       interval: 10s
@@ -102,9 +131,14 @@ services:
       - /tmp:mode=1777,size=64m
     volumes:
       - litellm-db:/var/lib/postgresql/data
+    secrets:
+      - postgres_password
+    pids_limit: ${POSTGRES_PIDS_LIMIT:-256}
+    mem_limit: ${POSTGRES_MEMORY:-1g}
+    cpus: ${POSTGRES_CPUS:-1}
     environment:
       POSTGRES_USER: litellm
-      POSTGRES_PASSWORD: ${LITELLM_DB_PASSWORD:-litellm-local}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
       POSTGRES_DB: litellm
     security_opt:
       - no-new-privileges:true
@@ -147,6 +181,7 @@ services:
     init: true
     pids_limit: ${EXCALIDRAW_PIDS_LIMIT:-512}
     mem_limit: ${EXCALIDRAW_MEMORY:-2g}
+    cpus: ${EXCALIDRAW_CPUS:-1}
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -187,6 +222,9 @@ services:
     init: true
     pids_limit: ${LLAMA_PIDS_LIMIT:-512}
     mem_limit: ${LLAMA_MEMORY:-6g}
+    cpus: ${LLAMA_CPUS:-4}
+    secrets:
+      - llama_api_key
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -195,7 +233,6 @@ services:
       - ${LLAMA_MODEL_PATH:-./models/model.gguf}:/models/model.gguf:ro
     environment:
       HOME: /tmp
-      LLAMA_API_KEY: ${LLAMA_API_KEY:-sk-llama-local}
       LLAMA_CTX_SIZE: ${LLAMA_CTX_SIZE:-65536}
       LLAMA_N_GPU_LAYERS: ${LLAMA_N_GPU_LAYERS:-0}
     # The shell defers $${...} expansion to container start, so the GPU
@@ -218,7 +255,7 @@ services:
           --cache-type-v q8_0 \
           --jinja \
           --no-webui \
-          --api-key "$${LLAMA_API_KEY}"
+          --api-key "$$(cat /run/secrets/llama_api_key)"
     healthcheck:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/health"]
       interval: 10s
@@ -241,12 +278,17 @@ services:
       - /app/.cache:mode=1777,size=256m
     volumes:
       - ./litellm.yaml:/app/config.yaml:ro
-      - ./secrets:/run/secrets:ro
+    secrets:
+      - litellm_master_key
+      - source: litellm_env
+        target: litellm.env
+      - postgres_password
+      - llama_api_key
+    pids_limit: ${LITELLM_PIDS_LIMIT:-512}
+    mem_limit: ${LITELLM_MEMORY:-2g}
+    cpus: ${LITELLM_CPUS:-2}
     environment:
       HOME: /tmp
-      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
-      LITELLM_DATABASE_URL: postgresql://litellm:${LITELLM_DB_PASSWORD:-litellm-local}@postgres:5432/litellm
-      LLAMA_API_KEY: ${LLAMA_API_KEY:-sk-llama-local}
     depends_on:
       postgres:
         condition: service_healthy
@@ -261,6 +303,11 @@ services:
       - -c
     command:
       - |
+        set -e
+        LITELLM_MASTER_KEY="$$(cat /run/secrets/litellm_master_key)"
+        LLAMA_API_KEY="$$(cat /run/secrets/llama_api_key)"
+        LITELLM_DATABASE_URL="postgresql://litellm:$$(cat /run/secrets/postgres_password)@postgres:5432/litellm"
+        export LITELLM_MASTER_KEY LLAMA_API_KEY LITELLM_DATABASE_URL
         set -a
         [ -f /run/secrets/litellm.env ] && . /run/secrets/litellm.env
         set +a
@@ -276,14 +323,56 @@ services:
       retries: 20
       start_period: 30s
 
+  broker-state-init:
+    image: opencode-lease-broker:local
+    container_name: opencode-broker-state-init
+    user: "0:0"
+    command:
+      - chown
+      - -R
+      - "${OPENCODE_UID:-1000}:${OPENCODE_GID:-1000}"
+      - /state
+    network_mode: none
+    read_only: true
+    pids_limit: 64
+    mem_limit: 64m
+    cpus: 0.5
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    volumes:
+      - broker-state:/state
+
   broker:
     <<: *broker
     container_name: opencode-broker
     networks:
       - opencode-agent
-      - opencode-egress
+    secrets:
+      - source: github_app_pem
+        target: github-app.pem
+      - litellm_keygen_key
+    pids_limit: ${BROKER_PIDS_LIMIT:-128}
+    mem_limit: ${BROKER_MEMORY:-256m}
+    cpus: ${BROKER_CPUS:-0.5}
+    # GitHub is reached only through Squid. litellm stays direct.
+    environment:
+      <<: *broker-env
+      HTTPS_PROXY: http://squid:3128
+      HTTP_PROXY: http://squid:3128
+      https_proxy: http://squid:3128
+      http_proxy: http://squid:3128
+      NO_PROXY: litellm,squid,localhost,127.0.0.1
+      no_proxy: litellm,squid,localhost,127.0.0.1
     depends_on:
+      broker-state-init:
+        condition: service_completed_successfully
       litellm:
+        condition: service_healthy
+      squid:
         condition: service_healthy
     healthcheck:
       test:
@@ -311,11 +400,22 @@ services:
       - --port
       - "8081"
       - --no-access-log
+    secrets:
+      - litellm_keygen_key
+      - broker_admin_token
+    pids_limit: ${BROKER_ADMIN_PIDS_LIMIT:-128}
+    mem_limit: ${BROKER_ADMIN_MEMORY:-256m}
+    cpus: ${BROKER_ADMIN_CPUS:-0.5}
+    environment:
+      <<: *broker-env
+      BROKER_ADMIN_TOKEN_FILE: /run/secrets/broker_admin_token
     networks:
       - opencode-egress
     ports:
       - 127.0.0.1:8081:8081
     depends_on:
+      broker-state-init:
+        condition: service_completed_successfully
       litellm:
         condition: service_healthy
     healthcheck:

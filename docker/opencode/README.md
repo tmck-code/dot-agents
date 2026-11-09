@@ -17,6 +17,13 @@ It runs as a non-root `agent` user built with your host UID/GID.
 
 ## Safe mode is the default
 
+![Isolation architecture: host, agent network and stack services](https://github.com/user-attachments/assets/4d66a81a-9f54-4cb8-acce-0897dbe708e4)
+
+The second diagram shows one session from lease approval to merge, including
+an on-demand service token grant.
+
+![Session and token grant sequence](https://github.com/user-attachments/assets/7e4d2efd-df61-4ea3-aad7-d6905e1a5c2d)
+
 `run.sh` now starts the agent on an internal-only Docker network with a local
 security stack around it:
 
@@ -88,41 +95,48 @@ mounts the whole repo. Override either with `REPO_ROOT=/path`.
 
 ## Mounts
 
-The table below is the **legacy** mount set used by `--unsafe` (and partly by
-`--with-ssh` / `--with-gh`). Safe mode is described under
-[Secure stack](#secure-stack): config is read-only, state/cache are named
-volumes, and host credential directories are absent by default.
+The "Legacy (`--unsafe`)" column is the legacy mount set used by `--unsafe` (and
+partly by `--with-ssh` / `--with-gh`). The "Safe mode" column is what safe mode
+mounts. Safe mode is described under [Secure stack](#secure-stack).
 
-| Host | Container | Notes |
-|---|---|---|
-| repo root (git root of `$PWD`) | same absolute path | read-write; also the workdir |
-| `git rev-parse --git-common-dir` (worktrees) | same absolute path | read-write; only when outside the repo |
-| main working tree (linked worktrees) | same absolute path | read-only; keeps `~/.claude` symlinks resolving |
-| `${CLAUDE_CONFIG_DIR:-~/.claude}` | `/home/agent/.claude` | read-write; skills, commands |
-| `~/.agents` (if present) | `/home/agent/.agents` | read-write; OpenCode skills |
-| `${XDG_CONFIG_HOME:-~/.config}/opencode` | `/home/agent/.config/opencode` | read-write; config, including `cli.json` |
-| local plugin dirs listed in `cli.json` | same absolute path | read-only; keeps absolute `plugins` entries resolvable |
-| `${XDG_DATA_HOME:-~/.local/share}/opencode` | `/home/agent/.local/share/opencode` | read-write; auth, sessions, db |
-| `${XDG_STATE_HOME:-~/.local/state}/opencode` | `/home/agent/.local/state/opencode` | read-write |
-| `${XDG_CACHE_HOME:-~/.cache}/opencode` | `/home/agent/.cache/opencode` | read-write |
-| `~/.gitconfig` (if present) | `/home/agent/.gitconfig` | read-only |
-| `~/.config/gh` (if present) | `/home/agent/.config/gh` | read-only; host `gh auth login` |
-| `~/.ssh` (if present) | `/home/agent/.ssh` | read-only; keys, `config`, `known_hosts` |
-| `$SSH_AUTH_SOCK` (Linux, when running) | `/ssh-agent` | socket, for git over SSH |
+| Host | Container | Legacy (`--unsafe`) | Safe mode |
+|---|---|---|---|
+| repo root (git root of `$PWD`) | same absolute path | read-write; also the workdir | session clone, read-write (see [Session workspace](#session-workspace)); the host repo is not mounted |
+| `git rev-parse --git-common-dir` | same absolute path | read-write; only when outside the repo | `objects/` only, read-only, so clone alternates resolve |
+| main working tree (linked worktrees) | same absolute path | read-only; keeps `~/.claude` symlinks resolving | absent |
+| `${CLAUDE_CONFIG_DIR:-~/.claude}` | `/home/agent/.claude` | read-write; skills, commands | staged allowlist, read-only |
+| `~/.agents` (if present) | `/home/agent/.agents` | read-write; OpenCode skills | read-only |
+| `${XDG_CONFIG_HOME:-~/.config}/opencode` | `/home/agent/.config/opencode` | read-write; config, including `cli.json` | read-only |
+| local plugin dirs listed in `cli.json` | same absolute path | read-only; keeps absolute `plugins` entries resolvable | read-only |
+| `${XDG_DATA_HOME:-~/.local/share}/opencode` | `/home/agent/.local/share/opencode` | read-write; auth, sessions, db | named volume `opencode-data` |
+| `${XDG_STATE_HOME:-~/.local/state}/opencode` | `/home/agent/.local/state/opencode` | read-write | named volume `opencode-state` |
+| `${XDG_CACHE_HOME:-~/.cache}/opencode` | `/home/agent/.cache/opencode` | read-write | named volume `opencode-cache` |
+| `~/.gitconfig` (if present) | `/home/agent/.gitconfig` | read-only | read-only |
+| `~/.config/gh` (if present) | `/home/agent/.config/gh` | read-only; host `gh auth login` | absent unless `--with-gh` |
+| `~/.ssh` (if present) | `/home/agent/.ssh` | read-only; keys, `config`, `known_hosts` | absent unless `--with-ssh` |
+| `$SSH_AUTH_SOCK` (Linux, when running) | `/ssh-agent` | socket, for git over SSH | absent unless `--with-ssh` |
+
+Safe mode also mounts the named volume `opencode-audit`, and the volumes
+`opencode-home-local` and `opencode-home-npm` with `--read-only`.
+
+The staged `~/.claude` in safe mode contains only the allowlisted entries
+`skills`, `commands`, `hooks`, `agents`, `scripts` and `CLAUDE.md` (override with
+`CLAUDE_ALLOW_DIRS`) and a `settings.json` without `mcpServers`, `apiKeyHelper`
+and token-like `env` entries. Credentials, history and `.claude.json` are not
+copied.
 
 `CLAUDE_CONFIG_DIR` is set to `/home/agent/.claude` inside the container. A host
 `OPENCODE_CONFIG_DIR` is deliberately not forwarded, so OpenCode uses its
-default container config dir. Host dirs are created before Docker starts, so
-they keep your ownership rather than becoming root-owned. Mounting the repo at
-its host path also keeps the absolute symlinks `deploy.sh` creates under
-`~/.claude` resolving inside the container.
+default container config dir. With `--unsafe`, host dirs are created before
+Docker starts, so they keep your ownership rather than becoming root-owned.
+Mounting the repo at its host path also keeps the absolute symlinks `deploy.sh`
+creates under `~/.claude` resolving inside the container.
 
-In a linked worktree, git keeps metadata under the main repo's
+With `--unsafe` in a linked worktree, git keeps metadata under the main repo's
 `.git/worktrees/<name>`, outside the worktree root. `run.sh` resolves
 `git rev-parse --git-common-dir` and mounts it read-write when it is outside the
-repo mount, so `git status`, commits, and hooks work in the container. It also
-mounts the main working tree read-only, so absolute `~/.claude` symlinks into
-the main checkout resolve while writes to it stay blocked.
+repo mount, and mounts the main working tree read-only. Safe mode uses neither
+mount; it works in a session clone instead.
 
 ## Git and GitHub
 
@@ -233,26 +247,69 @@ The Dockerfile is architecture-neutral: the OpenCode installer selects
   This pushes `linux/amd64` and `linux/arm64`. A multi-arch manifest cannot be
   `--load`ed into the local image store, which is why it pushes. Use a registry
   the target machines can pull from.
-- Published images use UID/GID `1000:1000` regardless of the build host, so the
-  manifest is reproducible. Override with `PUBLISH_UID=` / `PUBLISH_GID=`.
+- Published images use the fixed UID/GID `60917:60917`, the same as local
+  builds, so the manifest is reproducible. Override with `PUBLISH_UID=` /
+  `PUBLISH_GID=`.
 - A cross-arch build needs QEMU/binfmt; without it the foreign stage fails at
   its first `RUN`. Building natively on each architecture avoids that.
 
 ## UID/GID
 
-The image runs as `agent` with the UID/GID passed at build time. `run.sh` warns
-when they differ from the host. Rebuild after a UID change:
-
-```
-make clean && make build
-```
+The image runs as `agent` with the fixed UID/GID `60917:60917`, not the host's
+IDs. Regular accounts stay below `UID_MAX` 60000, systemd `DynamicUser` uses
+61184-65519 and 65534 is `nobody`, so 60917 collides with none of them. It is
+below 65536, so a default 65536-wide subordinate range maps it.
+`make build` uses `60917` for `UID` and `GID`, and so does the published image
+(`PUBLISH_UID` / `PUBLISH_GID`). `run.sh` refuses safe mode when the image label
+`dev.opencode.uid` equals your own uid.
 
 `GID=20` (macOS `staff`) is handled: Debian already uses 20 for `dialout`, so
 the build reuses that group name instead of failing. A UID that already exists
 in the image is a build error; pass another free `UID=`.
 
-Published multi-arch images deliberately use `1000:1000` (`PUBLISH_UID` /
-`PUBLISH_GID`), not the builder's ID. Build locally to match any other host UID.
+If you built the image before this change, rebuild it and remove the old named
+volumes (`opencode-data`, `opencode-state`, `opencode-cache`, `opencode-audit`),
+which belong to the old uid. `run.sh` detects an unwritable volume and prints
+the `docker volume rm` command.
+
+### Rootless Docker
+
+Safe mode requires an isolation backend. `run.sh` accepts macOS (every macOS
+Docker engine runs containers in a Linux VM), Docker Desktop, rootless Docker
+(`name=rootless`) or a daemon with `userns-remap` (`name=userns`). Any other
+rootful daemon is refused with setup instructions. With rootless Docker,
+container root maps to your host user and uid 60917 maps into the subordinate
+range, so a container escape lands as an unprivileged user.
+
+Linux setup:
+
+```bash
+dockerd-rootless-setuptool.sh install
+# /etc/subuid and /etc/subgid need an entry of at least 65536 ids, for example:
+#   freman:100000:65536
+export DOCKER_HOST=unix://$XDG_RUNTIME_DIR/docker.sock
+systemctl --user enable --now docker
+```
+
+The stack networks and volumes are created again on the rootless daemon.
+
+Under rootless Docker, uid 60917 in the container is host uid
+`subuid_start + 60917`, and that uid owns none of your files. So:
+
+- **Read-only mounts must be world-readable.** The staged `~/.claude`, the
+  OpenCode config and the host `<git-common-dir>/objects` need `o+r` on files
+  and `o+rx` on directories. `run.sh` checks the staged directory and the
+  objects directory and names the first path that fails. A repository created
+  with `umask 077` fails this check.
+- **Writable content is created by the container.** The session clone is created
+  by uid 60917, so it is owned by the mapped uid and no file of yours changes
+  owner.
+- **Mode 0600 host files are unreadable to the agent.** For example
+  `~/.config/opencode/service.json`. This is intended.
+
+On macOS, Docker Desktop file sharing presents shared files as owned by the
+accessing uid, so uid 60917 reads and writes them without `chown`. No subuid
+setup applies.
 
 ## Build args
 
@@ -262,7 +319,7 @@ Published multi-arch images deliberately use `1000:1000` (`PUBLISH_UID` /
 | `OPENCODE_SHA256` | empty | Optional SHA-256 of the OpenCode binary; set it in CI/releases for a fully verified download |
 | `PYTHON_VERSION` | `3.13` | uv-managed CPython |
 | `UID` / `GID` | host `id -u` / `id -g` | local container user |
-| `PUBLISH_UID` / `PUBLISH_GID` | `1000` / `1000` | user baked into published multi-arch images |
+| `PUBLISH_UID` / `PUBLISH_GID` | `60917` / `60917` | user baked into published multi-arch images |
 | `IMAGE` | `opencode-dev:local` | local tag (`make`) |
 
 ```
@@ -276,13 +333,13 @@ make build OPENCODE_VERSION=2.1.5 PYTHON_VERSION=3.12
 ```
 host ── 127.0.0.1:8081 ── broker-admin (no internal network)
                               │   shared SQLite state
-host ── docker compose ── broker (opencode-agent + opencode-egress)
+host ── docker compose ── broker (opencode-agent only)
                               │
                          opencode-agent (internal: true)
                          ├── agent        (this launcher)
                          ├── squid        (dual-homed)
                          ├── litellm      (dual-homed)
-                         └── broker       (dual-homed)
+                         └── broker       (agent network only; reaches GitHub through squid)
                               │
                          opencode-egress (bridge, outbound only)
 
@@ -292,8 +349,8 @@ host ── docker compose ── broker (opencode-agent + opencode-egress)
                          └── litellm
 ```
 
-Only Squid, LiteLLM and the broker join `opencode-egress`. The agent has no
-default route, no host gateway and no default bridge. Postgres and the optional
+Only Squid and LiteLLM join `opencode-egress`. The broker reaches GitHub through
+Squid. The agent has no default route, no host gateway and no default bridge. Postgres and the optional
 llama.cpp runtime are on a separate internal network reachable only by LiteLLM.
 Squid sees destinations, not bodies or headers. It does not terminate TLS, so
 no custom CA is installed in the agent.
@@ -306,31 +363,62 @@ cd ~/dev/dot-agents/docker/opencode
 # 1. Build the image (digest-pinned bases; no secrets in the context).
 make build
 
-# 2. Start the stack, the local qwen3.5 model, and a qwen-local lease.
-#    This creates stack/secrets/stack.env with generated keys on first use.
-make llama-up
+# 2. Provide the online provider key for the default model. Online models are
+#    called through LiteLLM, so the root key never reaches the agent container.
+#    Either write it once:
+mkdir -p stack/secrets && chmod 700 stack/secrets
+printf 'DEEPSEEK_API_KEY=%s\n' 'sk-your-deepseek-key' >> stack/secrets/litellm.env
+chmod 600 stack/secrets/litellm.env
 
-# 3. Optional: start the Excalidraw renderer sidecar.
+#    ...or let the launcher read it from KeePassXC on the host. Entries created
+#    by keepassxc-import.sh use the variable name as the entry title. The key
+#    is written to stack/secrets/litellm.env, which only LiteLLM can read.
+#    Generated secrets (broker-admin.token, litellm-master.key,
+#    litellm-keygen.key, postgres-password, llama-api-key) are created by
+#    step 3 on first run; the GitHub App key goes to github-app.pem (--pem).
+KEEPASSXC_DB=~/.secrets.kdbx \
+  ./scripts/opencode-secrets.sh --source keepassxc \
+  --entry DEEPSEEK_API_KEY=DEEPSEEK_API_KEY --merge
+
+# 3. Start the stack and approve an online-model lease (deepseek-chat by
+#    default). This does not start the optional llama.cpp profile.
+make online-up
+
+# 4. Optional: start the Excalidraw renderer sidecar.
 make excalidraw-up
 
-# 4. Run OpenCode. The default model is litellm/qwen-local.
+# 5. Run OpenCode. The default model is litellm/deepseek-chat.
 make run
 ```
 
 `make shell` opens the same container with bash instead of the TUI.
 
-If you keep secrets in SOPS+age or KeePassXC, resolve them before `make
-llama-up`:
+To use a different online model, export `OPENCODE_MODEL` before both the lease
+and the launch, or use `/model` inside OpenCode:
 
 ```bash
-./scripts/opencode-secrets.sh --source sops --file secrets.enc.yaml \
-    --keys GITHUB_APP_ID,LITELLM_MASTER_KEY,BROKER_ADMIN_TOKEN,ANTHROPIC_API_KEY
+OPENCODE_MODEL=litellm/claude-sonnet make online-up
+OPENCODE_MODEL=litellm/claude-sonnet make run
+```
 
-# or use the generated stack.env:
-docker compose -f stack/docker-compose.yml \
-    --env-file stack/secrets/stack.env up -d
-./bin/lease approve --session "$USER" --service all \
-    --repo owner/repo --model qwen-local --ttl 8h
+The optional local llama.cpp model still works. `make llama-up` starts that
+profile and approves a `qwen-local` lease; launch with
+`OPENCODE_MODEL=litellm/qwen-local make run`, or switch with `/model`.
+
+If you keep secrets in SOPS+age or KeePassXC, resolve them before `make
+online-up` (include the key for your chosen provider, e.g. `DEEPSEEK_API_KEY`):
+
+```bash
+./scripts/opencode-secrets.sh --source sops --file secrets.enc.yaml --merge \
+    --keys GITHUB_APP_ID,DEEPSEEK_API_KEY
+
+# KeePassXC entry titles match the variable names. Provider keys land in
+# stack/secrets/litellm.env; the master key and admin token get their own files:
+KEEPASSXC_DB=~/.secrets.kdbx ./scripts/opencode-secrets.sh --source keepassxc \
+    --entry DEEPSEEK_API_KEY=DEEPSEEK_API_KEY --merge
+
+# then start the stack and lease the model:
+make online-up
 ```
 
 `./bin/lease list` shows active leases with scope and expiry. `./bin/lease
@@ -341,17 +429,38 @@ key; an already-issued installation token remains valid until GitHub expires it.
 
 | Flag | Effect |
 |---|---|
-| (none) | Safe mode: internal network, dropped capabilities, resource limits, read-only host config, scoped git config, lease credentials |
+| (none) | Safe mode: rootless Docker required, internal network, dropped capabilities, resource limits, read-only staged config, session clone, scoped git config, lease credentials |
 | `--shell` | bash in the same hardened container |
 | `--read-only` | Read-only rootfs plus tmpfs `/tmp`, `/run` and named writable volumes for home/caches |
 | `--with-ssh` | Mount `~/.ssh` read-only and forward `SSH_AUTH_SOCK` on Linux (warns) |
 | `--with-gh` | Mount `~/.config/gh` read-only (warns) |
+| `--allow-rootful` | Skip the rootless check, for debugging only. Needs `OPENCODE_I_ACCEPT_UNSAFE=1`; warns and writes `launcher.rootful_override` |
 | `--unsafe` | Legacy behaviour: default bridge, host gateway, SSH/gh mounts, token passthrough, no capability/resource defaults (warns) |
 
 Safe mode fails closed when `opencode-squid`, `opencode-broker` or
-`opencode-litellm` is not healthy, or when no lease token exists. `--unsafe`
-skips those checks by design; it is for one trusted debugging session, not a
-daily default.
+`opencode-litellm` is not healthy, or when no lease token exists. It also
+refuses to start on a rootful Docker daemon (see
+[Rootless Docker](#rootless-docker)).
+
+`--unsafe` is for one trusted debugging session, not a daily default. It
+skips the stack checks by design and needs all of:
+
+- `OPENCODE_I_ACCEPT_UNSAFE=1` in the environment;
+- stdin and stderr are terminals;
+- you type `unsafe` at the prompt after the warning.
+
+Otherwise it exits 2 and writes `unsafe.refused`. There is no non-interactive
+bypass. A successful start writes `unsafe.start` with the list of exposures.
+With `--unsafe` the container runs as `0:0` on rootless Docker (container root
+is your host user) and as your own uid and gid on a rootful daemon.
+
+`OPENCODE_DOCKER_ARGS` adds extra `docker run` arguments. Flags that widen
+isolation are rejected with exit 2, in the forms `--flag`, `--flag=value`, `-f`
+and `-fvalue`: `--privileged`, `--network`, `--net`, `--pid`, `--ipc`, `--uts`,
+`--userns`, `--cgroupns`, `--cap-add`, `--security-opt`, `--device`, `-u`,
+`--user`, `-v`, `--volume`, `--mount` and `--volumes-from`. Other arguments, such
+as `--env FOO=bar`, are accepted. With `OPENCODE_I_ACCEPT_UNSAFE=1` the rejected
+flags are allowed with a warning and a `docker_args.override` audit line.
 
 ### Resource limits
 
@@ -372,6 +481,113 @@ lease is active. The App private key stays in the broker container's read-only
 secret mount. A leaked installation token expires on GitHub's schedule; after
 revocation the broker refuses to mint a replacement.
 
+### Session workspace
+
+In safe mode the agent does not work in your checkout. Each launch creates a
+separate clone of the repository for that session. Your host `.git` has no
+writable path from the container.
+
+Layout, under `${XDG_STATE_HOME:-~/.local/state}/opencode/sessions/<id>/`
+(directory mode 0700):
+
+| Path | Contents |
+|---|---|
+| `session.json` | `session_id`, `repo_root`, `git_common_dir`, `base_ref`, `base_sha`, `branch`, `created_at` |
+| `claude/` | staged allowlisted copy of `~/.claude`, mounted read-only |
+| `work/` | the clone, mounted read-write at the same absolute path and used as the workdir |
+
+- The id is `<UTC yyyymmddTHHMMSS>-<6 hex digits>`. The branch is
+  `opencode/<id>`. The lease `--session` value is the same id. Set
+  `OPENCODE_SESSION_ID` to preset it (it must match the id format and the
+  session must not exist yet).
+- The clone is created by a one-shot container as uid 60917 with no network. It
+  shares the host object store through git alternates: the host
+  `<git-common-dir>/objects` is mounted read-only at its real path.
+- `origin` is set to the host `remote.origin.url` when that URL is `https://`
+  (any user name or password removed), so `git fetch` goes through Squid and the
+  lease credential helper. Otherwise `origin` is removed.
+- **Uncommitted changes are not carried into the session.** The clone starts at
+  the commit `HEAD` points to. `run.sh` prints a warning when the working tree
+  is dirty.
+- `work/` stays mode 0777 so the agent uid can write to it. The session
+  directory above it is 0700, so other host users cannot reach it. The files
+  inside `work/` are owned by the agent uid, so the host user cannot delete
+  them; use `clean`.
+- A host `git gc --prune=now` after a history rewrite of the base can remove
+  objects that a running session needs.
+
+Subcommands. They must be the first argument. `opencode-docker` passes them
+through to `run.sh`.
+
+```bash
+./run.sh sessions          # list sessions for this repo: ID BRANCH BASE_REF BASE_SHA CREATED_AT
+./run.sh review [ID]       # review the newest session, or ID
+./run.sh clean ID          # remove a session and its review ref
+```
+
+`review` runs `git fetch` in the host repo from the clone into
+`refs/opencode/review/<id>`. It never runs another git command inside the clone,
+so the clone's `config` and hooks are never read by a host git process. It then
+prints:
+
+- `git diff --stat <base_sha>...refs/opencode/review/<id>`;
+- a highlighted list of changed paths that can execute code when you use them:
+  `.githooks/**`, `.envrc`, `.env*`, `Makefile`, `*.mk`, `.github/workflows/**`,
+  `.claude/**`, `.opencode/**`, `.mcp.json`, `AGENTS.md`, `CLAUDE.md`,
+  `.gitmodules`, `.pre-commit-config.yaml`, and `package.json` when its
+  `scripts` changed;
+- the merge command, which it does not run.
+
+Merge flow:
+
+```bash
+./run.sh                   # work; commits land on opencode/<id> in the clone
+./run.sh review            # read the stat and the flagged paths
+git merge --no-ff refs/opencode/review/<id>
+./run.sh clean <id>
+```
+
+`review` and `clean` write `session.review` and `session.clean` audit lines.
+`clean` removes `work/` through a one-shot container as the agent uid, then
+removes the session directory. `--unsafe` does not create a session; it mounts
+the repo directly as before.
+
+### Logging
+
+Every component writes one JSON object per line with the keys `ts`,
+`component`, `event`, `lease_id`, `repo`, `outcome` (`ok`, `deny`, `error`,
+`warn`) and `detail`. No line contains a secret value.
+
+| Source | Where | Component |
+|---|---|---|
+| `run.sh` and `bin/lease` | `${XDG_STATE_HOME:-~/.local/state}/opencode/audit.jsonl` (mode 0600; not mounted in safe mode) | `run.sh`, `lease-cli` |
+| broker | `docker logs opencode-broker` | `broker` |
+| broker admin | `docker logs opencode-broker-admin` | `broker-admin` |
+| Squid | `access.log` in the `opencode-squid-logs` volume | `squid` |
+
+Squid records the agent-supplied `X-Lease-Id` header as
+`detail.claimed_lease_id`, not as `lease_id`, because the agent can set any
+value. Query strings are stripped from URLs.
+
+`bin/opencode-log pretty` reads JSON lines from files or stdin. It needs `uv`
+and network access on first run, because it depends on
+[laser-prynter](https://github.com/tmck-code/laser-prynter) through inline
+script metadata.
+
+```bash
+opencode-log pretty ~/.local/state/opencode/audit.jsonl
+docker logs opencode-broker 2>&1 | opencode-log pretty --outcome deny
+docker logs opencode-broker-admin 2>&1 | opencode-log pretty --lease lse_abc
+docker run --rm -v opencode-squid-logs:/l:ro alpine cat /l/access.log \
+  | opencode-log pretty --component squid --outcome deny
+opencode-log pretty --no-color --style dracula audit.jsonl
+```
+
+Options are `--component`, `--lease`, `--outcome`, `--style` (default
+`dracula`) and `--no-color`. Colour is off when `NO_COLOR` is set or stdout is
+not a terminal. The `outcome` value is green for `ok`, red for `deny` and
+`error`, and yellow for `warn`. Lines that are not JSON are printed unchanged.
+
 ### Model providers
 
 OpenCode provider config points at `http://litellm:4000/v1` and uses
@@ -383,6 +599,43 @@ providers in `stack/litellm.yaml` and keep the aliases in
 `config/opencode.jsonc` in sync. A revoked lease deletes the virtual key, so
 LiteLLM rejects further calls with it.
 
+The shipped catalogue lists the online aliases (`deepseek-chat`,
+`deepseek-reasoner`, `claude-sonnet`, `claude-opus`, `gpt-mini`) and the optional
+local `qwen-local`. The default comes from `OPENCODE_MODEL`
+(`litellm/deepseek-chat` when unset). Only aliases backed by a key in
+`stack/secrets/litellm.env` will actually answer; a lease restricts the virtual
+key to the model you approved.
+
+#### Online model (no llama container)
+
+```bash
+cd ~/dev/dot-agents/docker/opencode
+make online-up             # start Squid/broker/LiteLLM/Postgres + deepseek lease
+make online-status
+make online-logs
+make online-down           # stop containers, keep named volumes
+```
+
+`online-up` does not enable the `llama` profile. When the provider key is not
+already in `stack/secrets/litellm.env`, the launcher looks it up in KeePassXC if
+`~/.secrets.kdbx` exists (override with `KEEPASSXC_DB` or `--keepass-db`). The
+entry defaults to the variable name, matching `keepassxc-import.sh`; override it
+with `KEEPASSXC_ENTRY`, `--keepass-entry` (for example
+`opencode/DEEPSEEK_API_KEY`), or pass `--no-keepass`. It prompts for
+the database password on the terminal unless `KEEPASSXC_PASSWORD` is set, then
+writes only that key to `litellm.env` (mode 0600) without printing it. The KDBX,
+its password and the plaintext key stay on the host: only the LiteLLM container
+mounts `litellm.env`, and the agent still receives only a per-lease virtual key.
+
+Resolving the key *inside* the agent container would be less secure: the KDBX,
+its password or the provider root key would then be reachable by prompt-injected
+code. Keep the lookup on the host and let LiteLLM be the only holder of the root
+key.
+
+To use another alias, run
+`OPENCODE_MODEL=litellm/claude-sonnet make online-up` and launch with the same
+value exported; the lease uses the alias after the `litellm/` prefix.
+
 ### Local model (llama.cpp)
 
 The stack can serve a local Qwen3.5 4B through llama.cpp without giving the
@@ -390,8 +643,8 @@ agent another route. The `llama` service is profile-gated and attached only to
 `opencode-data`; only LiteLLM can reach `http://llama:8080/v1`.
 
 The model runtime is profile-gated, so the base stack can start without a GGUF
-or a GPU. Because `litellm/qwen-local` is the default OpenCode model, start the
-local runtime before launching OpenCode. The quickest path is one command:
+or a GPU. Online models are the default; start the local runtime only when you
+want the `qwen-local` alias:
 
 ```bash
 cd ~/dev/dot-agents/docker/opencode
@@ -400,14 +653,15 @@ make llama-up
 
 `make llama-up` resolves the existing Ollama `qwen3.5:4b` blob, auto-detects an
 NVIDIA GPU (use `LLAMA_GPU=0 make llama-up` for CPU), starts the profile, waits
-for health, and approves a `qwen-local` lease using the admin token from
-`stack/secrets/stack.env` or `LEASE_ADMIN_TOKEN`.
+for health, and approves a `qwen-local` lease using the admin token file
+`stack/secrets/broker-admin.token` (or `LEASE_ADMIN_TOKEN_FILE`).
 
-On first use it creates `stack/secrets/stack.env` (mode 0600) with a generated
-`BROKER_ADMIN_TOKEN` and `LITELLM_MASTER_KEY` when they are missing. This is why
-`make llama-up` works without a separate secrets setup; LiteLLM refuses an
-empty master key by design. Reuse the same file for subsequent starts, or run
-`scripts/opencode-secrets.sh` if you keep secrets in SOPS/KeePassXC.
+On first use it creates the missing generated secret files in `stack/secrets/`
+(mode 0600, one file per secret, see [Secrets](#secrets)), including
+`broker-admin.token` and `litellm-master.key`. This is why `make llama-up`
+works without a separate secrets setup; LiteLLM refuses an empty master key by
+design. Existing files are never overwritten. Run `scripts/opencode-secrets.sh`
+if you keep secrets in SOPS/KeePassXC.
 
 Useful lifecycle commands:
 
@@ -462,7 +716,7 @@ make llama-up
 | `LLAMA_UID` / `LLAMA_GID` | `1000` / `1000` | Container user; must be able to read the GGUF |
 | `LLAMA_MEMORY` | `6g` | Container memory limit |
 | `LLAMA_PIDS_LIMIT` | `512` | Container PID limit |
-| `LLAMA_API_KEY` | `sk-llama-local` | Shared key between llama.cpp and LiteLLM; never given to the agent |
+| `LLAMA_API_KEY` | generated in `stack/secrets/llama-api-key` | Shared key between llama.cpp and LiteLLM, read from the secret file; never given to the agent |
 
 The runtime uses one slot (`--parallel 1`), flash attention, `q8_0` KV cache and
 the model's Jinja template, which keeps tool calls working. Thinking stays on by
@@ -480,24 +734,20 @@ manually:
 /model litellm/qwen-local
 ```
 
-`litellm/qwen-local` is the default and only listed OpenCode model. Cloud
-aliases such as `litellm/claude-sonnet` remain configured in LiteLLM but are
-omitted from `provider.litellm.models` in `config/opencode.jsonc`, so they do
-not appear in the model picker. Add the alias back to that map and rebuild the
-image to expose it again.
+`litellm/qwen-local` is listed alongside the online aliases; it is not the
+default. Use `/model litellm/qwen-local`, or set
+`OPENCODE_MODEL=litellm/qwen-local` in the environment before launching.
 
-**Rollback:** to use a cloud model again, add it back to
-`provider.litellm.models`, set the top-level `model` back to
-`litellm/claude-sonnet`, rebuild the image, and revoke the `qwen-local` lease.
-Then stop the optional service:
+**Switch back to an online model:** approve a lease for the alias, then use
+`/model` or relaunch with `OPENCODE_MODEL`:
 
 ```bash
-./bin/lease revoke <lease_id>
-make llama-down
+OPENCODE_MODEL=litellm/deepseek-chat make online-up
+OPENCODE_MODEL=litellm/deepseek-chat make run
 ```
 
-Cloud aliases keep working without restarting LiteLLM. The profile can be left
-stopped indefinitely.
+The llama profile can be left stopped indefinitely; online models keep working
+without restarting LiteLLM. To reclaim its memory, run `make llama-down`.
 
 ### Excalidraw renderer (optional)
 
@@ -554,8 +804,16 @@ Squid is a destination allowlist, not an authorisation system:
 - It cannot enforce HTTP methods or paths.
 - It cannot inject headers; that is why LiteLLM and the broker exist.
 - It does not terminate TLS, so it sees `CONNECT host:443` only.
-- An allowed domain can still be an exfiltration channel. Scope the allowlist
-  to what the project needs.
+- It denies requests whose resolved destination address is private, loopback,
+  link-local, carrier-grade NAT or unique-local (`blocked_dst`). Squid resolves
+  the name and checks the address, so DNS rebinding and an allowlisted name that
+  resolves to a private address are refused. The pinned `opencode-egress`
+  gateway is inside this range, so the Docker gateway is denied too.
+- The Google entry is `generativelanguage.googleapis.com`, not all of
+  `.googleapis.com`.
+- An allowed domain can still be an exfiltration channel. See
+  [Accepted exfiltration risk](#accepted-exfiltration-risk). Scope the
+  allowlist to what the project needs.
 
 Provider authentication is handled by LiteLLM; git and cloud token injection is
 handled by the lease broker or credential helper. Do not add a TLS-intercepting
@@ -578,7 +836,7 @@ LiteLLM virtual key while the lease is active.
 
 The agent can write to its audit volume, so plugin audit is a convenience. The
 Squid access log (`opencode-squid-logs` volume) and the broker's issuance events
-are the authoritative records. Neither logs request bodies, headers or token
+are the authoritative records (see [Logging](#logging)). Neither logs request bodies, headers or token
 values.
 
 ### Claude Code hooks in OpenCode
@@ -604,9 +862,14 @@ the host-only `ban-host-npm.py` guard is skipped (npm inside the container is
 not the host risk it guards, and there is no Docker socket to redirect into).
 The other guards remain active.
 
-Because safe mode mounts `~/.claude` read-only, hooks that persist state under
-`$CLAUDE_CONFIG_DIR/hooks/state` may lose their state in the container; the
-blocking guards still work. OpenCode notifications are configured natively in
+Because safe mode mounts a staged copy of `~/.claude` read-only, hooks cannot
+persist state under `$CLAUDE_CONFIG_DIR/hooks/state`; they lose that state in the
+container. The staged copy contains only the allowlisted entries `skills`,
+`commands`, `hooks`, `agents`, `scripts` and `CLAUDE.md` (override with
+`CLAUDE_ALLOW_DIRS`), plus a filtered `settings.json`. Hooks that call
+`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/scripts/*` still work because `scripts` is
+in the allowlist. The blocking guards still work. OpenCode notifications are
+configured natively in
 `cli.json` (`attention.*`), not through `agent-notify.py`.
 
 To see hook invocations, set `OPENCODE_HOOKS_DEBUG=1`; the bridge writes
@@ -615,10 +878,58 @@ To see hook invocations, set `OPENCODE_HOOKS_DEBUG=1`; the bridge writes
 ### Secrets
 
 Use SOPS+age as the primary store or a dedicated KeePassXC database as an
-alternative. `scripts/opencode-secrets.sh` decrypts only the named values:
+alternative. The KeePassXC flow has four steps:
+
+1. The host KeePassXC database holds the long-lived secrets. The agent never
+   sees the `.kdbx` file or its password.
+2. `scripts/opencode-secrets.sh --source keepassxc` extracts the named entries,
+   and the GitHub App private key attachment with `--pem`.
+3. The values are written to one file per secret in
+   `docker/opencode/stack/secrets/` (directory 0700, files 0600, git-ignored).
+4. `stack/docker-compose.yml` grants each file only to the services in the
+   table below, as compose `secrets:` under `/run/secrets/`.
+
+`stack.env` now holds only non-secret settings (`GITHUB_APP_ID`,
+`GITHUB_INSTALLATION_ID`, `LITELLM_MODELS`). It no longer holds
+`BROKER_ADMIN_TOKEN` or `LITELLM_MASTER_KEY`.
+
+| Secret file | `broker` | `broker-admin` | `litellm` | `postgres` | `llama` |
+|---|---|---|---|---|---|
+| `github-app.pem` | yes | | | | |
+| `litellm-keygen.key` | yes | yes | | | |
+| `broker-admin.token` | | yes | | | |
+| `litellm-master.key` | | | yes | | |
+| `litellm.env` (provider keys only) | | | yes | | |
+| `postgres-password` | | | yes | yes | |
+| `llama-api-key` | | | yes | | yes |
+
+`online.sh` and `llama.sh` create the generated files on first run
+(`broker-admin.token`, `litellm-master.key`, `litellm-keygen.key`,
+`postgres-password`, `llama-api-key`) and never overwrite an existing file. They
+also create `litellm.env` and `github-app.pem` empty, so compose can start. An
+empty `github-app.pem` leaves the GitHub features disabled (the broker returns
+503 for GitHub tokens). On the first run after an upgrade, the scripts move
+`BROKER_ADMIN_TOKEN` and `LITELLM_MASTER_KEY` out of `stack.env` into their own
+files.
+
+The broker uses a separate key-generation credential, `litellm-keygen.key`, to
+create and delete per-lease virtual keys. It is a LiteLLM key limited to
+`/key/generate`, `/key/delete` and `/key/info`. A live check on the pinned
+LiteLLM image showed these routes work and that `/model/new`, `/user/new` and
+`/key/list` return 403. The script registers the key after `up`.
+
+`scripts/opencode-secrets.sh` routes each name to a file:
+
+| Name or option | File | Format |
+|---|---|---|
+| `LITELLM_MASTER_KEY` | `litellm-master.key` | bare value |
+| `BROKER_ADMIN_TOKEN` | `broker-admin.token` | bare value |
+| provider keys (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `GOOGLE_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `MISTRAL_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`) | `litellm.env` | `NAME=value` |
+| any other name, such as `GITHUB_APP_ID` | `stack.env` | `NAME=value` |
+| `--pem ENTRY[:ATTACHMENT]` | `github-app.pem` | attachment exported from the entry (default attachment name `github-app.pem`) |
 
 ```bash
-# SOPS+age
+# SOPS+age (not used with --pem)
 ./scripts/opencode-secrets.sh --source sops --file secrets.enc.yaml \
     --keys GITHUB_APP_ID,GITHUB_INSTALLATION_ID,BROKER_ADMIN_TOKEN,LITELLM_MASTER_KEY,ANTHROPIC_API_KEY
 
@@ -628,21 +939,86 @@ KEEPASSXC_PASSWORD=... ./scripts/opencode-secrets.sh --source keepassxc \
     --db ~/vaults/opencode.kdbx \
     --entry GITHUB_APP_ID=github/app-id \
     --entry ANTHROPIC_API_KEY=providers/anthropic
+
+# Add the OpenRouter key without touching other files:
+./scripts/opencode-secrets.sh --source keepassxc --db ~/vaults/opencode.kdbx \
+    --entry OPENROUTER_API_KEY=providers/openrouter --merge
+
+# Place the GitHub App private key from an entry attachment:
+./scripts/opencode-secrets.sh --source keepassxc --db ~/vaults/opencode.kdbx \
+    --pem github/app:github-app.pem
 ```
 
-It writes `stack/secrets/stack.env` and `stack/secrets/litellm.env` (directory
-0700, files 0600, git-ignored). Keep the age key at
-`~/.config/sops/age/keys.txt` (mode 0600) and keep an offline backup: without it
-the encrypted file cannot be recovered.
+A run without `--merge` overwrites the files it writes and truncates
+`litellm.env` and `stack.env` on the first write to each. It leaves files it does
+not write alone. Pass `--merge` to update only the named keys and keep existing
+lines. Keep the age key at `~/.config/sops/age/keys.txt` (mode 0600) and keep an
+offline backup: without it the encrypted file cannot be recovered.
 
 For KeePassXC, the wrapper uses `keepassxc-cli show -q -a password <db>
-<entry>`. The KDBX file and its password never go into the image or the agent
-container, and only the resolved values land in the host-side env files. Never
-mount the KDBX, the age key or the decrypted files into the agent.
+<entry>` and `keepassxc-cli attachment-export` for `--pem`. The database
+password is passed on stdin, never in the command line. The KDBX file and its
+password never go into the image or the agent container, and only the resolved
+values land in the host-side files. Never mount the KDBX, the age key or the
+decrypted files into the agent.
 
 A pre-commit scan (`.githooks/pre-commit` → `scripts/secret-scan.sh`) runs
 `gitleaks protect --staged` when available and otherwise a built-in staged-file
 scanner. Bypass a reviewed false positive with `SKIP_SECRET_SCAN=1`.
+
+### On-demand service tokens
+
+A lease can carry a token for a service other than GitHub and LiteLLM, such as
+an Excalidraw API key. The secret stays on the host until you grant it. The
+broker holds only the secrets of active grants.
+
+```bash
+lease grant <lease_id> <service> [--ttl 30m|1h|seconds] [--file PATH | --keepassxc ENTRY]
+lease ungrant <lease_id> <service>
+lease token <service>          # inside the container; prints JSON to stdout
+```
+
+- The service name matches `^[a-z][a-z0-9-]{1,31}$`. `github`, `litellm` and
+  `all` are refused.
+- The default secret source is `stack/secrets/services/<service>.env`, with
+  `NAME=value` lines (all pairs are sent). `LEASE_SERVICES_DIR` changes the
+  directory. The file is git-ignored.
+- `--keepassxc ENTRY` reads the entry password with `keepassxc-cli` and sends it
+  as `TOKEN`. The database is `$KEEPASSXC_DB` (default `~/.secrets.kdbx`).
+- The default TTL is 15 minutes. The broker caps it at one hour
+  (`BROKER_MAX_GRANT_TTL_SECONDS`, default grant TTL
+  `BROKER_DEFAULT_GRANT_TTL_SECONDS`) and at the lease's remaining lifetime.
+- Values go to the loopback admin port in a request body from a 0600 temporary
+  file. They are not in the command line, and no log line contains them.
+- The agent calls `lease token <service>`. The broker returns
+  `{"service", "values", "expires_at"}` while the grant is active and 403
+  otherwise. Read the output into a process environment. Do not write it to a
+  file.
+- `lease revoke <lease_id>` revokes all grants of the lease. `lease ungrant`
+  revokes one.
+
+Worked example for an Excalidraw API key:
+
+```bash
+# On the host: the key is in KeePassXC as excalidraw/api-key.
+lease grant lse_abc excalidraw --keepassxc excalidraw/api-key --ttl 30m
+
+# In the container:
+lease token excalidraw
+# {"service":"excalidraw","values":{"TOKEN":"..."},"expires_at":"..."}
+```
+
+Limits:
+
+- **Revoking a grant does not revoke the key at the provider.** It only stops
+  the broker from handing the key out. Keep TTLs short and rotate any key that
+  may have leaked.
+- **The service host must also be in the Squid allowlist.** The Excalidraw API
+  host is not in `stack/squid.conf` yet. Whether to add it is an open question
+  in the design. Until it is added, the agent can fetch the token but cannot
+  reach the service.
+- Granted values sit in plaintext in the broker SQLite state until they expire
+  or are revoked.
 
 ### Rollback
 
@@ -665,9 +1041,9 @@ the secure stack.
   `AGENTS.md` can still influence the agent; system policy denies project
   plugins and MCP by default, but review what you approve.
 - **Shared kernel.** Docker containers share the host kernel. A kernel exploit
-  or a Docker escape defeats this design. Keep Docker patched, prefer rootless
-  Docker, and use a microVM or cloud sandbox for untrusted repos or unattended
-  autonomy.
+  or a Docker escape defeats this design. Keep Docker patched (safe mode requires rootless
+  Docker or a VM-based engine), and use a microVM or cloud sandbox for
+  untrusted repos or unattended autonomy.
 - **`--unsafe` trade-off.** It restores host credential mounts, the host gateway
   and token passthrough, and drops capability/resource defaults. It prints a
   warning for a reason: treat it as a one-off debugging tool.
@@ -677,6 +1053,27 @@ the secure stack.
   restore general host access.
 - **Auto mode.** `--auto` only suppresses prompts. It does not relax a system
   deny, and is only appropriate inside the hardened container.
+
+#### Accepted exfiltration risk
+
+The Squid allowlist limits where data can go. It does not stop data from
+leaving. An agent, or a prompt injection that controls it, can send data to any
+allowlisted destination:
+
+- **GitHub.** `github.com` and `api.github.com` are allowed. The agent can push
+  to any repository or create any gist that its lease token can write, and the
+  destination can belong to someone else if the token reaches it.
+- **Model providers.** The provider domains in the allowlist (for example
+  `.anthropic.com`, `.openai.com`, `.openrouter.ai`, `.deepseek.com`,
+  `.groq.com`, `.mistral.ai`, `.x.ai`) are allowed. The agent can call a provider with a key it supplies itself, so the
+  request body carries the data to an account the attacker owns.
+- **Other allowlisted domains.** Package registries and any domain you add can
+  carry data in URLs or request bodies. Squid sees the destination only, not
+  the body.
+
+This risk is accepted. Reduce it by keeping lease scopes narrow (few
+repositories, short TTL), by keeping the allowlist small, and by reading the
+Squid `access.log` for unexpected destinations (see [Logging](#logging)).
 
 ## Legacy baseline
 

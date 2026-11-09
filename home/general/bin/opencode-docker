@@ -2,7 +2,8 @@
 # Run the OpenCode dev container against the repo you are standing in.
 #
 #   opencode-docker                 # OpenCode TUI in this repo
-#   opencode-docker --stack         # start the safe stack + lease, then run
+#   opencode-docker --stack         # start the safe stack + online model lease, then run
+#   opencode-docker --stack-local   # start the safe stack + local llama.cpp lease, then run
 #   opencode-docker --shell         # bash in the same container setup
 #   opencode-docker run "explain"   # any non-TUI OpenCode command
 #   opencode-docker --unsafe        # legacy trust model, for trusted debugging
@@ -42,23 +43,45 @@ usage() {
 Usage: opencode-docker [wrapper options] [opencode arguments]
 
 Wrapper options:
-  --stack          start the safe stack + lease, then launch
+  --stack          start the safe stack + online-model lease, then launch
+  --stack-local    start the safe stack + local llama.cpp lease, then launch
   --status         show the safe-stack containers
   --down           stop the safe stack (pass --volumes to remove named volumes)
   --unsafe         legacy trust model, for trusted debugging
   -h, --help       show this help and run.sh options
 
+Subcommands (passed to run.sh, no stack is started):
+  review [ID]      show the diff of a session branch and flag executable config
+  sessions         list sessions of this repository
+  clean ID         delete a session and its review ref
+
 Everything else is passed through to run.sh/opencode, e.g. --shell or
 `run "summarise this repo"`.
+
+The online stack uses OPENCODE_MODEL (default litellm/deepseek-chat) for the
+lease; export the same value when launching OpenCode to match it.
 EOF
 }
 
 compose=(docker compose -f "$docker_dir/stack/docker-compose.yml" --profile llama --profile tools)
 
 # --stack starts the documented safe-mode stack (internal network, Squid,
-# broker, LiteLLM, local qwen model) and approves a lease before launching.
+# broker, LiteLLM) with an online-model lease. --stack-local additionally starts
+# the optional llama.cpp profile and leases qwen-local.
 args=("$@")
+
+# Session subcommands only touch the host repository and session directories,
+# so they run before the image check and without the stack.
+if (( ${#args[@]} > 0 )); then
+  case "${args[0]}" in
+    review|sessions|clean)
+      export REPO_ROOT="$repo_root"
+      exec "$run_sh" "${args[@]}"
+      ;;
+  esac
+fi
 want_stack=0
+want_stack_local=0
 want_unsafe=0
 want_help=0
 want_down=0
@@ -66,6 +89,7 @@ want_status=0
 for arg in "${args[@]}"; do
   case "$arg" in
     --stack) want_stack=1 ;;
+    --stack-local) want_stack_local=1 ;;
     --unsafe) want_unsafe=1 ;;
     --down) want_down=1 ;;
     --status) want_status=1 ;;
@@ -76,7 +100,7 @@ done
 pass_args=()
 for arg in "${args[@]}"; do
   case "$arg" in
-    --stack|--down|--status) ;;
+    --stack|--stack-local|--down|--status) ;;
     *) pass_args+=("$arg") ;;
   esac
 done
@@ -84,6 +108,19 @@ done
 if (( want_down && want_status )); then
   echo "error: --down and --status are mutually exclusive" >&2
   exit 2
+fi
+if (( want_stack && want_stack_local )); then
+  echo "error: --stack and --stack-local are mutually exclusive" >&2
+  exit 2
+fi
+
+# A missing image otherwise surfaces only after the stack and lease are ready.
+if (( ! want_help && ! want_down && ! want_status )); then
+  image="${IMAGE:-opencode-dev:local}"
+  if ! docker image inspect "$image" >/dev/null 2>&1; then
+    echo "OpenCode image '$image' is missing; building it first..." >&2
+    make -C "$docker_dir" build
+  fi
 fi
 
 if (( want_help )); then
@@ -106,20 +143,27 @@ elif (( want_down )); then
 elif (( want_status )); then
   exec "${compose[@]}" ps "${pass_args[@]}"
 elif (( want_stack )); then
-  echo "Starting the safe OpenCode stack (this can take a minute)..." >&2
+  echo "Starting the safe OpenCode stack with an online-model lease (this can take a minute)..." >&2
+  make -C "$docker_dir" online-up
+elif (( want_stack_local )); then
+  echo "Starting the safe OpenCode stack with the local llama.cpp model (this can take a minute)..." >&2
   make -C "$docker_dir" llama-up
+  export OPENCODE_MODEL="${OPENCODE_MODEL:-litellm/qwen-local}"
 elif (( ! want_unsafe )) && ! docker network inspect opencode-agent >/dev/null 2>&1; then
   cat >&2 <<EOF
 error: the safe-mode stack is not running.
 
-Start it once (safe mode, local qwen model + lease):
+Start it once (safe mode, online model + lease):
   opencode-docker --stack
+
+Or start the optional local llama.cpp model instead:
+  opencode-docker --stack-local
 
 Or run a one-off with host credentials:
   opencode-docker --unsafe
 
 Manual setup:
-  make -C "$docker_dir" llama-up
+  make -C "$docker_dir" online-up
 EOF
   exit 1
 fi

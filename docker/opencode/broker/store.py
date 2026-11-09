@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from . import log
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS leases (
     lease_id TEXT PRIMARY KEY,
@@ -44,6 +46,17 @@ CREATE TABLE IF NOT EXISTS events (
     detail TEXT,
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS grants (
+    grant_id TEXT PRIMARY KEY,
+    lease_id TEXT NOT NULL,
+    service TEXT NOT NULL,
+    secret_json TEXT,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    UNIQUE(lease_id, service)
+);
 """
 
 
@@ -70,6 +83,7 @@ def lease_token(lease_id: str) -> str:
 class Store:
     def __init__(self, path: str) -> None:
         self.path = path
+        self.component = "broker"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         with self._session() as conn:
             conn.executescript(SCHEMA)
@@ -168,6 +182,7 @@ class Store:
             conn.execute(
                 "UPDATE leases SET status = 'revoked' WHERE lease_id = ?", (lease_id,)
             )
+            self._clear_grants(conn, lease_id)
         lease = self.get(lease_id)
         if lease:
             self.event(lease_id, "lease.revoke", "ok")
@@ -205,6 +220,7 @@ class Store:
                 "WHERE lease_id = ?",
                 (lease_id,),
             )
+            self._clear_grants(conn, lease_id)
 
     def event(
         self,
@@ -219,7 +235,7 @@ class Store:
             detail = {
                 key: value
                 for key, value in detail.items()
-                if key not in {"token", "lease_token", "litellm_key", "private_key"}
+                if key not in log.SECRET_KEYS
             }
         with self._session() as conn:
             conn.execute(
@@ -233,6 +249,112 @@ class Store:
                     iso(now or utcnow()),
                 ),
             )
+        repo = None
+        if lease_id:
+            lease = self.get(lease_id)
+            if lease and lease["resources"]:
+                repo = lease["resources"][0]
+        log.emit(
+            self.component, action, lease_id, repo, log.outcome_for(result), detail
+        )
+
+    def _clear_grants(self, conn: sqlite3.Connection, lease_id: str) -> None:
+        conn.execute(
+            "UPDATE grants SET status = 'revoked', secret_json = NULL "
+            "WHERE lease_id = ?",
+            (lease_id,),
+        )
+
+    def grant(
+        self,
+        lease_id: str,
+        service: str,
+        values: dict[str, str],
+        expires_at: datetime,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Create or replace the grant for a lease and service."""
+        grant_id = f"grant_{secrets.token_hex(8)}"
+        created = iso(now or utcnow())
+        with self._session() as conn:
+            conn.execute(
+                """
+                INSERT INTO grants (
+                    grant_id, lease_id, service, secret_json,
+                    created_at, expires_at, status
+                ) VALUES (?, ?, ?, ?, ?, ?, 'active')
+                ON CONFLICT(lease_id, service) DO UPDATE SET
+                    grant_id = excluded.grant_id,
+                    secret_json = excluded.secret_json,
+                    created_at = excluded.created_at,
+                    expires_at = excluded.expires_at,
+                    status = 'active'
+                """,
+                (
+                    grant_id,
+                    lease_id,
+                    service,
+                    json.dumps(values),
+                    created,
+                    iso(expires_at),
+                ),
+            )
+        return {
+            "grant_id": grant_id,
+            "lease_id": lease_id,
+            "service": service,
+            "created_at": created,
+            "expires_at": iso(expires_at),
+            "status": "active",
+        }
+
+    def active_grant(
+        self, lease_id: str, service: str, now: datetime | None = None
+    ) -> dict[str, Any] | None:
+        """Return the grant with its values, or None. Clears it when expired."""
+        now = now or utcnow()
+        with self._session() as conn:
+            row = conn.execute(
+                "SELECT * FROM grants WHERE lease_id = ? AND service = ? "
+                "AND status = 'active'",
+                (lease_id, service),
+            ).fetchone()
+            if not row:
+                return None
+            if parse_iso(row["expires_at"]) <= now:
+                conn.execute(
+                    "UPDATE grants SET status = 'expired', secret_json = NULL "
+                    "WHERE grant_id = ?",
+                    (row["grant_id"],),
+                )
+                return None
+        record = dict(row)
+        record["values"] = json.loads(record.pop("secret_json") or "{}")
+        return record
+
+    def revoke_grant(self, lease_id: str, service: str) -> bool:
+        """Revoke one grant and clear its values. True when one was active."""
+        with self._session() as conn:
+            cursor = conn.execute(
+                "UPDATE grants SET status = 'revoked', secret_json = NULL "
+                "WHERE lease_id = ? AND service = ? AND status = 'active'",
+                (lease_id, service),
+            )
+        return cursor.rowcount > 0
+
+    def list_grants(
+        self, lease_id: str, now: datetime | None = None
+    ) -> list[dict[str, Any]]:
+        """Active, unexpired grants without values."""
+        now = iso(now or utcnow())
+        with self._session() as conn:
+            rows = conn.execute(
+                "SELECT grant_id, lease_id, service, created_at, expires_at, status "
+                "FROM grants WHERE lease_id = ? AND status = 'active' "
+                "AND expires_at > ? ORDER BY service",
+                (lease_id, now),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def events(self, lease_id: str | None = None) -> list[dict[str, Any]]:
         query = "SELECT * FROM events"

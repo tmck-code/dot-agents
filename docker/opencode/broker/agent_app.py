@@ -54,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None,
     )
     app.state.settings = settings
+    store.component = "broker"
     app.state.store = store
 
     def require_lease(
@@ -155,7 +156,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             key = litellm.create_virtual_key(
                 base_url=settings.litellm_url,
-                master_key=settings.litellm_master_key,
+                keygen_key=settings.litellm_keygen_key,
                 lease_id=lease["lease_id"],
                 models=models,
                 budget_usd=lease["budget_usd"],
@@ -177,6 +178,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.set_litellm_key(lease["lease_id"], key)
         store.event(lease["lease_id"], "litellm.key", "ok")
         return {"key": key, "base_url": _litellm_base_url(settings)}
+
+    @app.get("/v1/token/{service}")
+    def service_token(
+        service: str,
+        lease: dict[str, Any] = Depends(require_lease),
+    ) -> dict[str, Any]:
+        grant = store.active_grant(lease["lease_id"], service)
+        if not grant:
+            store.event(
+                lease["lease_id"], "token.issue", "deny", {"service": service}
+            )
+            raise HTTPException(status_code=403, detail="no active grant")
+        store.event(lease["lease_id"], "token.issue", "ok", {"service": service})
+        return {
+            "service": service,
+            "values": grant["values"],
+            "expires_at": grant["expires_at"],
+        }
 
     return app
 

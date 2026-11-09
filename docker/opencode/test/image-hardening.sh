@@ -19,6 +19,8 @@ docker run --rm --init --entrypoint bash "$IMAGE" -c '
   set -euo pipefail
   [[ "$(id -un)" == "agent" ]]
   [[ "$(id -u)" -ne 0 ]]
+  [[ "$(id -u)" == "60917" ]]
+  [[ "$(id -g)" == "60917" ]]
   command -v sudo >/dev/null && { echo "sudo must not be installed" >&2; exit 1; } || true
   [[ ! -e /home/agent/.ssh ]]
   [[ ! -e /home/agent/.config/gh ]]

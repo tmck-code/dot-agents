@@ -1,0 +1,147 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#   "laser-prynter @ git+https://github.com/tmck-code/laser-prynter.git",
+# ]
+# ///
+'View OpenCode structured audit logs (see the structured-audit-log spec).'
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections.abc import Iterable, Iterator
+from typing import TextIO
+
+from laser_prynter import pp
+from pygments import highlight
+from pygments.formatters import Terminal256Formatter
+from pygments.lexers import JsonLexer
+from pygments.styles import get_style_by_name
+
+KEYS     = ('ts', 'component', 'event', 'lease_id', 'repo', 'outcome', 'detail')
+DEFAULT_STYLE = 'dracula'
+
+RESET   = '\033[0m'
+RED     = '\033[31m'
+GREEN   = '\033[32m'
+YELLOW  = '\033[33m'
+BLUE    = '\033[34m'
+MAGENTA = '\033[35m'
+CYAN    = '\033[36m'
+WHITE   = '\033[37m'
+
+KEY_COLORS = {
+    'ts':        CYAN,
+    'component': MAGENTA,
+    'event':     BLUE,
+    'lease_id':  YELLOW,
+    'repo':      GREEN,
+    'outcome':   WHITE,
+    'detail':    CYAN,
+}
+OTHER_KEY_COLOR = WHITE
+OUTCOME_COLORS  = {'ok': GREEN, 'deny': RED, 'error': RED, 'warn': YELLOW}
+
+
+def use_color(stream: TextIO, no_color_flag: bool, environ: dict[str, str]) -> bool:
+    'Colour is off for --no-color, NO_COLOR, or a non-terminal stream.'
+    if no_color_flag or environ.get('NO_COLOR'):
+        return False
+    return stream.isatty()
+
+
+def parse_line(line: str) -> dict[str, object] | None:
+    'Return the record in schema key order, or None when the line is not a JSON object.'
+    try:
+        record = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(record, dict):
+        return None
+    ordered = {k: record[k] for k in KEYS if k in record}
+    ordered.update({k: v for k, v in record.items() if k not in ordered})
+    return ordered
+
+
+def matches(record: dict[str, object], args: argparse.Namespace) -> bool:
+    'Apply the --component, --lease and --outcome filters.'
+    if args.component and record.get('component') != args.component:
+        return False
+    if args.lease and record.get('lease_id') != args.lease:
+        return False
+    return not (args.outcome and record.get('outcome') != args.outcome)
+
+
+def read_lines(paths: list[str]) -> Iterator[str]:
+    if not paths:
+        yield from sys.stdin
+        return
+    for path in paths:
+        with open(path, encoding='utf-8') as fh:
+            yield from fh
+
+
+def colorize_record(record: dict[str, object], style: str) -> str:
+    'Render one record with a fixed colour per key and a coloured outcome value.'
+    formatter = Terminal256Formatter(style=get_style_by_name(style))
+    parts     = []
+    for key, value in record.items():
+        key_color = KEY_COLORS.get(key, OTHER_KEY_COLOR)
+        outcome   = OUTCOME_COLORS.get(value) if key == 'outcome' and isinstance(value, str) else None
+        text      = json.dumps(value, default=str)
+        if outcome:
+            shown = f'{outcome}{text}{RESET}'
+        else:
+            shown = highlight(text, JsonLexer(), formatter).strip()
+        parts.append(f'{key_color}{json.dumps(key)}{RESET}: {shown}')
+    return '{' + ', '.join(parts) + '}'
+
+
+def render(lines: Iterable[str], args: argparse.Namespace, color: bool, out: TextIO) -> None:
+    for line in lines:
+        line = line.rstrip('\n')
+        if not line.strip():
+            continue
+        record = parse_line(line)
+        if record is None:
+            print(line, file=out)
+            continue
+        if not matches(record, args):
+            continue
+        if color:
+            print(colorize_record(record, args.style), file=out)
+        else:
+            pp.ppd(record, style=None, file=out)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog='opencode-log')
+    sub    = parser.add_subparsers(dest='command', required=True)
+    pretty = sub.add_parser('pretty', help='print records one per line, coloured')
+    pretty.add_argument('files', nargs='*')
+    pretty.add_argument('--component')
+    pretty.add_argument('--lease')
+    pretty.add_argument('--outcome')
+    pretty.add_argument('--style', default=DEFAULT_STYLE)
+    pretty.add_argument('--no-color', action='store_true')
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args  = build_parser().parse_args(argv)
+    color = use_color(sys.stdout, args.no_color, dict(os.environ))
+    try:
+        render(read_lines(args.files), args, color, sys.stdout)
+    except BrokenPipeError:
+        return 0
+    except OSError as exc:
+        print(f'opencode-log: {exc}', file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

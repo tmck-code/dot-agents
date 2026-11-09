@@ -19,10 +19,6 @@ if [[ "${LLAMA_GPU:-0}" == "1" ]]; then
   COMPOSE+=(-f stack/docker-compose.llama-gpu.yml)
 fi
 export LLAMA_MODEL_PATH
-export LLAMA_API_KEY="${LLAMA_API_KEY:-sk-llama-local}"
-export LITELLM_MASTER_KEY="${LITELLM_MASTER_KEY:-sk-local-master}"
-export BROKER_ADMIN_TOKEN="${BROKER_ADMIN_TOKEN:-change-me}"
-export LITELLM_DB_PASSWORD="${LITELLM_DB_PASSWORD:-litellm-local}"
 export LLAMA_CTX_SIZE="${LLAMA_CTX_SIZE:-65536}"
 
 cleanup() {
@@ -35,24 +31,30 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   make build
 fi
 
-mkdir -p stack/secrets
+# shellcheck source=../stack/lib/secrets.sh
+. stack/lib/secrets.sh
+ensure_stack_secrets stack/secrets
+export LEASE_ADMIN_TOKEN_FILE="$PWD/stack/secrets/broker-admin.token"
+# Read the key from the secret file into the environment. It is passed to
+# containers by name only, so it never appears in an argv.
+LITELLM_MASTER_KEY="$(<stack/secrets/litellm-master.key)"
+export LITELLM_MASTER_KEY
 echo "llama-smoke: starting the stack with the llama profile"
 "${COMPOSE[@]}" up -d --build --wait
 
 echo "llama-smoke: checking llama.cpp health and context"
-docker exec opencode-llama curl -fsS \
-  -H "Authorization: Bearer $LLAMA_API_KEY" \
-  http://127.0.0.1:8080/health >/dev/null
-models_json="$(docker exec opencode-llama curl -fsS \
-  -H "Authorization: Bearer $LLAMA_API_KEY" \
-  http://127.0.0.1:8080/v1/models)"
+llama_curl() {
+  docker exec opencode-llama sh -c 'curl -fsS -H "Authorization: Bearer $(cat /run/secrets/llama_api_key)" "$1"' sh "$1"
+}
+llama_curl http://127.0.0.1:8080/health >/dev/null
+models_json="$(llama_curl http://127.0.0.1:8080/v1/models)"
 jq -e '.data[0].meta.n_ctx == 65536' >/dev/null <<<"$models_json" \
   || { echo "llama-smoke: unexpected context: $models_json" >&2; exit 1; }
 
 echo "llama-smoke: calling qwen-local through LiteLLM"
 agent_request() {
   docker run --rm --init --network opencode-agent \
-    --env "LITELLM_MASTER_KEY=$LITELLM_MASTER_KEY" \
+    --env LITELLM_MASTER_KEY \
     --entrypoint bash "$IMAGE" -c "$1"
 }
 

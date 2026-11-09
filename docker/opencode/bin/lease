@@ -5,6 +5,8 @@
 #   lease list
 #   lease revoke lease_abcd1234
 #   lease self                  # uses LEASE_TOKEN/BROKER_URL (agent-side)
+#   lease grant lse_abcd1234 excalidraw --ttl 30m --keepassxc excalidraw/api-key
+#   lease ungrant lse_abcd1234 excalidraw
 #   lease token github          # print a token for debugging
 #
 # Admin calls go to the host-only listener (127.0.0.1:8081 by default) and
@@ -13,7 +15,10 @@
 set -euo pipefail
 
 ADMIN_URL="${LEASE_ADMIN_URL:-http://127.0.0.1:8081}"
-ADMIN_TOKEN_FILE="${LEASE_ADMIN_TOKEN_FILE:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode/lease-admin.token}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ADMIN_TOKEN_FILE="${LEASE_ADMIN_TOKEN_FILE:-$SCRIPT_DIR/../stack/secrets/broker-admin.token}"
+SERVICES_DIR="${LEASE_SERVICES_DIR:-$SCRIPT_DIR/../stack/secrets/services}"
+AUDIT_LOG="${XDG_STATE_HOME:-$HOME/.local/state}/opencode/audit.jsonl"
 STATE_TOKEN_FILE="${LEASE_TOKEN_FILE:-${XDG_STATE_HOME:-$HOME/.local/state}/opencode/lease-token}"
 BROKER_URL="${BROKER_URL:-http://127.0.0.1:8081}"
 
@@ -27,7 +32,9 @@ Usage:
   lease list
   lease revoke LEASE_ID
   lease self
-  lease token github|litellm
+  lease grant LEASE_ID SERVICE [--ttl DURATION] [--file PATH | --keepassxc ENTRY]
+  lease ungrant LEASE_ID SERVICE
+  lease token SERVICE         # github, litellm or a granted service
 
 approve options:
   --session ID        Session identifier recorded on the lease (required)
@@ -43,6 +50,53 @@ Environment:
   LEASE_ADMIN_URL, LEASE_ADMIN_TOKEN, LEASE_ADMIN_TOKEN_FILE,
   LEASE_TOKEN_FILE, BROKER_URL, LEASE_TOKEN
 EOF
+}
+
+LOG_COMPONENT="lease-cli"
+
+# log_event EVENT OUTCOME [LEASE_ID] [REPO] [DETAIL_JSON]
+# Appends one schema line to the audit log. Secret-bearing detail keys are dropped.
+log_event() {
+  local event="$1" outcome="$2" lease_id="${3:-}" repo="${4:-}" detail="${5:-}"
+  [[ -n "$detail" ]] || detail='{}'
+  local ts line
+  ts="$(date -u +%Y-%m-%dT%H:%M:%S.%3NZ)"
+  line="$(jq -nc \
+    --arg ts "$ts" --arg component "$LOG_COMPONENT" --arg event "$event" \
+    --arg lease_id "$lease_id" --arg repo "$repo" --arg outcome "$outcome" \
+    --argjson detail "$detail" \
+    '{ts: $ts, component: $component, event: $event,
+      lease_id: (if $lease_id == "" then null else $lease_id end),
+      repo: (if $repo == "" then null else $repo end),
+      outcome: $outcome,
+      detail: ($detail | del(.token, .lease_token, .litellm_key, .private_key, .values))}')" || return 0
+  local dir
+  dir="$(dirname "$AUDIT_LOG")"
+  (
+    umask 077
+    mkdir -p "$dir"
+    printf '%s\n' "$line" >> "$AUDIT_LOG"
+  ) 2>/dev/null || true
+}
+
+http_detail() {
+  jq -nc --arg http "$HTTP_CODE" '{http: $http}'
+}
+
+# admin_request METHOD PATH [curl args...]
+# Sets RESPONSE and HTTP_CODE. Returns 0 only for a 2xx status.
+admin_request() {
+  local method="$1" path="$2"
+  shift 2
+  local out tok
+  tok="$(admin_token)" || exit 1
+  out="$(mktemp)"
+  HTTP_CODE="$(curl -sS --max-time 15 -o "$out" -w '%{http_code}' \
+    -X "$method" "$ADMIN_URL$path" \
+    -H "X-Admin-Token: $tok" "$@")" || HTTP_CODE="000"
+  RESPONSE="$(cat "$out")"
+  rm -f "$out"
+  [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]
 }
 
 admin_token() {
@@ -136,12 +190,15 @@ cmd_approve() {
     + (if $ttl == "" then {} else {ttl_seconds: ($ttl | tonumber)} end)
     + (if $budget == "" then {} else {budget_usd: ($budget | tonumber)} end)')"
 
-  local response
-  response="$(curl -fsS --max-time 15 \
-    -X POST "$ADMIN_URL/v1/leases" \
-    -H "Content-Type: application/json" \
-    -H "X-Admin-Token: $(admin_token)" \
-    -d "$body")" || die "could not create lease (is the stack running?)"
+  local response repo_arg="" first_repo="${repos[0]:-}"
+  [[ -n "$first_repo" ]] && repo_arg="$first_repo"
+  if ! admin_request POST "/v1/leases" -H "Content-Type: application/json" -d "$body"; then
+    log_event lease.approve error "" "$repo_arg" "$(jq -nc --arg http "$HTTP_CODE" --arg service "$service" '{http: $http, service: $service}')"
+    die "could not create lease (http $HTTP_CODE; is the stack running?)"
+  fi
+  response="$RESPONSE"
+  log_event lease.approve ok "$(jq -r '.lease_id // empty' <<<"$response")" "$repo_arg" \
+    "$(jq -nc --arg http "$HTTP_CODE" --arg service "$service" --arg session "$session" '{http: $http, service: $service, session: $session}')"
 
   local token
   token="$(jq -r '.lease_token // empty' <<<"$response")"
@@ -164,9 +221,121 @@ cmd_list() {
 cmd_revoke() {
   local lease_id="${1:-}"
   [[ -n "$lease_id" ]] || die "revoke needs a lease id"
-  curl -fsS --max-time 15 \
-    -X POST "$ADMIN_URL/v1/leases/$lease_id/revoke" \
-    -H "X-Admin-Token: $(admin_token)" | jq .
+  if ! admin_request POST "/v1/leases/$lease_id/revoke"; then
+    log_event lease.revoke error "$lease_id" "" "$(http_detail)"
+    die "revoke failed (http $HTTP_CODE)"
+  fi
+  log_event lease.revoke ok "$lease_id" "" "$(http_detail)"
+  jq . <<<"$RESPONSE"
+}
+
+# Read NAME=value lines from a file into a temp file of cleaned lines.
+read_env_file() {
+  local src="$1" dest="$2" name value count=0
+  while IFS='=' read -r name value || [[ -n "$name" ]]; do
+    name="${name%$'\r'}"
+    value="${value%$'\r'}"
+    [[ -z "$name" || "$name" == \#* ]] && continue
+    [[ "$name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || die "invalid variable name in $src"
+    printf '%s=%s\n' "$name" "$value" >> "$dest"
+    count=$((count + 1))
+  done < "$src"
+  ((count)) || die "no NAME=value lines in $src"
+}
+
+# Fetch an entry password with keepassxc-cli; the database password goes on stdin.
+read_keepassxc() {
+  local entry="$1" dest="$2" db="${KEEPASSXC_DB:-$HOME/.secrets.kdbx}" password secret
+  command -v keepassxc-cli >/dev/null 2>&1 || die "keepassxc-cli is not installed"
+  [[ -f "$db" ]] || die "KeePassXC database not found: $db"
+  password="${KEEPASSXC_PASSWORD:-}"
+  if [[ -z "$password" ]]; then
+    read -rsp "KeePassXC password for $db: " password < /dev/tty >&2 || die "no KeePassXC password"
+    echo >&2
+  fi
+  secret="$(printf '%s\n' "$password" | keepassxc-cli show -q -a password "$db" "$entry")" \
+    || die "keepassxc-cli could not read entry $entry"
+  [[ -n "$secret" ]] || die "KeePassXC entry $entry has an empty password"
+  printf 'TOKEN=%s\n' "$secret" >> "$dest"
+}
+
+cmd_grant() {
+  local lease_id="" service="" ttl="" file="" entry=""
+  while (($#)); do
+    case "$1" in
+      --ttl) ttl="${2:?--ttl needs a value}"; shift 2 ;;
+      --file) file="${2:?--file needs a value}"; shift 2 ;;
+      --keepassxc) entry="${2:?--keepassxc needs a value}"; shift 2 ;;
+      -h|--help) usage; exit 0 ;;
+      -*) die "unknown grant option: $1" ;;
+      *)
+        if [[ -z "$lease_id" ]]; then lease_id="$1"
+        elif [[ -z "$service" ]]; then service="$1"
+        else die "unexpected argument: $1"
+        fi
+        shift ;;
+    esac
+  done
+  [[ -n "$lease_id" && -n "$service" ]] || die "grant needs a lease id and a service"
+  [[ "$service" =~ ^[a-z][a-z0-9-]{1,31}$ ]] || die "invalid service name: $service"
+  case "$service" in
+    github|litellm|all) die "service $service is reserved and cannot be granted" ;;
+  esac
+  [[ -z "$file" || -z "$entry" ]] || die "use only one of --file and --keepassxc"
+  if [[ -z "$entry" && -z "$file" ]]; then
+    file="$SERVICES_DIR/$service.env"
+  fi
+  if [[ -z "$entry" && ! -f "$file" ]]; then
+    die "missing service file: $file (expected NAME=value lines)"
+  fi
+  local ttl_seconds=900
+  [[ -n "$ttl" ]] && ttl_seconds="$(parse_ttl "$ttl")"
+
+  local old_umask
+  old_umask="$(umask)"
+  umask 077
+  local pairs body_file
+  pairs="$(mktemp)"
+  body_file="$(mktemp)"
+  # shellcheck disable=SC2064
+  trap "rm -f '$pairs' '$body_file'" EXIT
+  umask "$old_umask"
+
+  if [[ -n "$entry" ]]; then
+    read_keepassxc "$entry" "$pairs"
+  else
+    read_env_file "$file" "$pairs"
+  fi
+  jq -n --arg service "$service" --argjson ttl "$ttl_seconds" --rawfile pairs "$pairs" \
+    '{service: $service, ttl_seconds: $ttl,
+      values: ($pairs | split("\n") | map(select(length > 0))
+        | map(index("=") as $i | {key: .[:$i], value: .[$i + 1:]}) | from_entries)}' \
+    > "$body_file"
+
+  local detail
+  detail="$(jq -nc --arg service "$service" --argjson ttl "$ttl_seconds" '{service: $service, ttl_seconds: $ttl}')"
+  if ! admin_request POST "/v1/leases/$lease_id/grants" \
+      -H "Content-Type: application/json" --data-binary "@$body_file"; then
+    log_event lease.grant error "$lease_id" "" "$(jq -c --arg http "$HTTP_CODE" '. + {http: $http}' <<<"$detail")"
+    rm -f "$pairs" "$body_file"
+    die "grant failed (http $HTTP_CODE)"
+  fi
+  rm -f "$pairs" "$body_file"
+  log_event lease.grant ok "$lease_id" "" "$(jq -c --arg http "$HTTP_CODE" '. + {http: $http}' <<<"$detail")"
+  jq 'del(.values, .secret_json)' <<<"$RESPONSE"
+}
+
+cmd_ungrant() {
+  local lease_id="${1:-}" service="${2:-}"
+  [[ -n "$lease_id" && -n "$service" ]] || die "ungrant needs a lease id and a service"
+  local detail
+  detail="$(jq -nc --arg service "$service" '{service: $service}')"
+  if ! admin_request DELETE "/v1/leases/$lease_id/grants/$service"; then
+    log_event lease.ungrant error "$lease_id" "" "$(jq -c --arg http "$HTTP_CODE" '. + {http: $http}' <<<"$detail")"
+    die "ungrant failed (http $HTTP_CODE)"
+  fi
+  log_event lease.ungrant ok "$lease_id" "" "$(jq -c --arg http "$HTTP_CODE" '. + {http: $http}' <<<"$detail")"
+  jq 'del(.values, .secret_json)' <<<"$RESPONSE"
 }
 
 cmd_self() {
@@ -178,8 +347,8 @@ cmd_self() {
 
 cmd_token() {
   local service="${1:-}"
-  [[ "$service" == github || "$service" == litellm ]] || die "token needs github or litellm"
-  : "${LEASE_TOKEN:?LEASE_TOKEN is not set}"
+  [[ "$service" =~ ^[a-z][a-z0-9-]{1,31}$ ]] || die "token needs a service name (github, litellm or a granted service)"
+  :"${LEASE_TOKEN:?LEASE_TOKEN is not set}"
   curl -fsS --max-time 15 \
     -H "Authorization: Bearer $LEASE_TOKEN" \
     "$BROKER_URL/v1/token/$service" | jq .
@@ -193,6 +362,8 @@ case "$command" in
   revoke) cmd_revoke "$@" ;;
   self) cmd_self "$@" ;;
   token) cmd_token "$@" ;;
+  grant) cmd_grant "$@" ;;
+  ungrant) cmd_ungrant "$@" ;;
   -h|--help|help|"") usage ;;
   *) die "unknown command: $command (try --help)" ;;
 esac

@@ -95,12 +95,20 @@
     { "action": "read", "resource": "**/*.kdbx", "effect": "deny" },
     { "action": "read", "resource": "**/age.key", "effect": "deny" },
     { "action": "read", "resource": "**/age-key.txt", "effect": "deny" },
-    { "action": "read", "resource": "**/secrets.yaml", "effect": "deny" }
+    { "action": "read", "resource": "**/secrets.yaml", "effect": "deny" },
+    { "action": "read", "resource": "**/.credentials.json", "effect": "deny" },
+    { "action": "edit", "resource": "**/.credentials.json", "effect": "deny" },
+    { "action": "read", "resource": "**/.claude.json", "effect": "deny" },
+    { "action": "edit", "resource": "**/.claude.json", "effect": "deny" },
+    { "action": "read", "resource": "**/history.jsonl", "effect": "deny" },
+    { "action": "edit", "resource": "**/history.jsonl", "effect": "deny" }
   ],
 
   // The only model provider is the local LiteLLM reverse proxy. The API key is
   // a per-lease virtual key resolved by the launcher; root provider keys remain
-  // in LiteLLM and never enter this container.
+  // in LiteLLM and never enter this container. The catalogue below lists both
+  // online aliases and the optional local model, so `/model` can switch without
+  // rebuilding the image.
   "provider": {
     "litellm": {
       "npm": "@ai-sdk/openai-compatible",
@@ -110,13 +118,43 @@
         "apiKey": "{env:LITELLM_API_KEY}"
       },
       "models": {
+        "deepseek-chat": {
+          "name": "DeepSeek V3.2 (online, via LiteLLM)",
+          "limit": { "context": 131072, "output": 8192 }
+        },
+        "deepseek-reasoner": {
+          "name": "DeepSeek R1 (online, via LiteLLM)",
+          "limit": { "context": 131072, "output": 65536 }
+        },
+        "claude-sonnet": {
+          "name": "Claude Sonnet 4.5 (online, via LiteLLM)",
+          "limit": { "context": 200000, "output": 64000 }
+        },
+        "claude-opus": {
+          "name": "Claude Opus 4.1 (online, via LiteLLM)",
+          "limit": { "context": 200000, "output": 32000 }
+        },
+        "gpt-mini": {
+          "name": "GPT-4o mini (online, via LiteLLM)",
+          "limit": { "context": 128000, "output": 16384 }
+        },
         "qwen-local": {
           "name": "Qwen3.5 4B (local, via LiteLLM)",
-          "limit": { "context": 65536, "output": 8192 }
+          "limit": { "context": 65536, "output": 8192 },
+          // Qwen3.5 can emit tens of thousands of thinking tokens for a
+          // coding prompt, which looks like a hang before the first header.
+          // Keep thinking off by default for this local alias; remove this
+          // body block (or set enable_thinking: true) to re-enable it.
+          "body": {
+            "chat_template_kwargs": { "enable_thinking": false }
+          }
         }
       }
     }
   },
 
-  "model": "litellm/qwen-local"
+  // Online by default so a checkout runs without a GGUF or GPU. The launcher
+  // exports OPENCODE_MODEL (default litellm/deepseek-chat); switch at runtime
+  // with `/model`, or export another provider/model before `make run`.
+  "model": "{env:OPENCODE_MODEL}"
 }
