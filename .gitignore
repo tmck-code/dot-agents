@@ -242,3 +242,6 @@ secrets.yaml
 *.kdbx.key
 age-key.txt
 age.key
+
+# OpenSpec working documents stay local
+openspec/
